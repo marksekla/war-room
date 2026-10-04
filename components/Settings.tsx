@@ -3,23 +3,49 @@
 import { useState } from "react";
 import { useLeague } from "@/lib/LeagueContext";
 import { DEFAULT_STRATEGY } from "@/lib/agent/strategy";
-import { listModels, PROVIDERS } from "@/lib/agent/run";
-import type { ProviderId } from "@/lib/types";
+import { COMPAT_PRESETS, listModels, PROVIDERS } from "@/lib/agent/run";
+import type { AiSettings, ProviderId } from "@/lib/types";
+
+const SEARCH_LABEL: Record<ProviderId, string> = {
+  anthropic: "Let the agent search the web for injury news and practice reports (small extra cost per search)",
+  openai: "Let the agent search the web for injury news and practice reports (small extra cost per search)",
+  gemini: "Let the agent use Google Search for news (newer Gemini models; turned off automatically if unsupported)",
+  compat: "Use OpenRouter's web search plugin (paid credits; ignored by other providers)",
+};
 
 export default function Settings({ onClose }: { onClose: () => void }) {
-  const { saved, setSaved } = useLeague();
-  const [ai, setAi] = useState(saved.ai);
+  const { saved, setSaved, model } = useLeague();
+  const [ai, setAi] = useState<AiSettings>(() => ({
+    ...saved.ai,
+    apiKey: saved.ai.keys?.[saved.ai.provider] ?? saved.ai.apiKey,
+  }));
   const [models, setModels] = useState<string[]>([]);
   const [modelErr, setModelErr] = useState<string | null>(null);
   const [loadingModels, setLoadingModels] = useState(false);
 
   const provider = PROVIDERS[ai.provider];
+  const preset = COMPAT_PRESETS.find((p) => p.url === ai.baseUrl);
+  const keyUrl = ai.provider === "compat" ? preset?.keyUrl ?? provider.keyUrl : provider.keyUrl;
+
+  const switchProvider = (id: ProviderId) => {
+    const keys = { ...(ai.keys ?? {}), [ai.provider]: ai.apiKey };
+    setAi({
+      ...ai,
+      keys,
+      provider: id,
+      apiKey: keys[id] ?? "",
+      model: "",
+      baseUrl: id === "compat" ? ai.baseUrl || COMPAT_PRESETS[0].url : ai.baseUrl,
+    });
+    setModels([]);
+    setModelErr(null);
+  };
 
   const fetchModels = async () => {
     setLoadingModels(true);
     setModelErr(null);
     try {
-      const list = await listModels(ai.provider, ai.apiKey);
+      const list = await listModels(ai);
       setModels(list);
       if (!ai.model && list.length) setAi({ ...ai, model: list[0] });
     } catch (e) {
@@ -30,9 +56,11 @@ export default function Settings({ onClose }: { onClose: () => void }) {
   };
 
   const save = () => {
-    setSaved({ ai });
+    setSaved({ ai: { ...ai, keys: { ...(ai.keys ?? {}), [ai.provider]: ai.apiKey } } });
     onClose();
   };
+
+  const nfl = model?.nfl;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={onClose}>
@@ -45,23 +73,48 @@ export default function Settings({ onClose }: { onClose: () => void }) {
         <div className="space-y-6">
           <div>
             <div className="hud-title mb-2">AI provider</div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {(Object.keys(PROVIDERS) as ProviderId[]).map((id) => (
                 <button
                   key={id}
-                  onClick={() => {
-                    setAi({ ...ai, provider: id, model: "" });
-                    setModels([]);
-                  }}
-                  className={`rounded-lg border px-4 py-3 text-left text-sm transition ${
+                  onClick={() => switchProvider(id)}
+                  className={`rounded-lg border px-3 py-2.5 text-left transition ${
                     ai.provider === id ? "border-cyan-300/70 bg-cyan-400/10 shadow-glow" : "border-white/10 hover:border-cyan-400/30"
                   }`}
                 >
-                  {PROVIDERS[id].label}
+                  <div className="text-sm font-semibold text-slate-100">{PROVIDERS[id].label}</div>
+                  <div className={`text-[11px] ${id === "gemini" ? "text-lime-300" : "text-slate-500"}`}>{PROVIDERS[id].sub}</div>
                 </button>
               ))}
             </div>
+            {provider.note && <p className="mt-2 text-xs text-slate-400">{provider.note}</p>}
           </div>
+
+          {ai.provider === "compat" && (
+            <div>
+              <div className="hud-title mb-2">Provider URL</div>
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {COMPAT_PRESETS.map((p) => (
+                  <button
+                    key={p.name}
+                    onClick={() => {
+                      setAi({ ...ai, baseUrl: p.url, model: "" });
+                      setModels([]);
+                    }}
+                    className={`rounded border px-2.5 py-1 text-xs ${ai.baseUrl === p.url ? "border-cyan-300/60 bg-cyan-400/10 text-cyan-100" : "border-white/10 text-slate-400 hover:text-slate-100"}`}
+                  >
+                    {p.name}
+                  </button>
+                ))}
+              </div>
+              <input
+                className="input font-mono text-sm"
+                placeholder="https://.../v1"
+                value={ai.baseUrl ?? ""}
+                onChange={(e) => setAi({ ...ai, baseUrl: e.target.value.trim() })}
+              />
+            </div>
+          )}
 
           <div>
             <div className="hud-title mb-2">API key</div>
@@ -75,8 +128,8 @@ export default function Settings({ onClose }: { onClose: () => void }) {
             />
             <p className="mt-2 text-xs text-slate-400">
               Get one at{" "}
-              <a className="text-cyan-300 underline" href={provider.keyUrl} target="_blank" rel="noreferrer">
-                {provider.keyUrl.replace("https://", "")}
+              <a className="text-cyan-300 underline" href={keyUrl} target="_blank" rel="noreferrer">
+                {keyUrl.replace("https://", "")}
               </a>
               . Your key is stored only in this browser and sent straight to the provider, never to this site&apos;s server.
             </p>
@@ -96,7 +149,7 @@ export default function Settings({ onClose }: { onClose: () => void }) {
               ) : (
                 <input
                   className="input font-mono"
-                  placeholder={`default: ${provider.defaultModel}`}
+                  placeholder={provider.defaultModel ? `default: ${provider.defaultModel}` : ai.provider === "gemini" ? "auto: newest Flash model" : "click Load models"}
                   value={ai.model}
                   onChange={(e) => setAi({ ...ai, model: e.target.value.trim() })}
                 />
@@ -105,12 +158,15 @@ export default function Settings({ onClose }: { onClose: () => void }) {
                 {loadingModels ? "Loading" : "Load models"}
               </button>
             </div>
+            {ai.provider === "compat" && ai.baseUrl?.includes("openrouter") && (
+              <p className="mt-2 text-xs text-slate-400">Free OpenRouter models end in &quot;:free&quot; and are listed first.</p>
+            )}
             {modelErr && <p className="mt-2 text-xs text-rose-300">{modelErr}</p>}
           </div>
 
           <label className="flex items-center gap-3 text-sm">
-            <input type="checkbox" checked={ai.webSearch} onChange={(e) => setAi({ ...ai, webSearch: e.target.checked })} className="h-4 w-4 accent-cyan-400" />
-            Let the agent search the web for injury news and practice reports (small extra cost per search)
+            <input type="checkbox" checked={ai.webSearch} onChange={(e) => setAi({ ...ai, webSearch: e.target.checked })} className="h-4 w-4 shrink-0 accent-cyan-400" />
+            {SEARCH_LABEL[ai.provider]}
           </label>
 
           <div>
@@ -126,6 +182,22 @@ export default function Settings({ onClose }: { onClose: () => void }) {
               onChange={(e) => setAi({ ...ai, strategy: e.target.value })}
             />
           </div>
+
+          <details className="rounded-lg border border-white/10 bg-black/20 p-3 text-xs text-slate-400">
+            <summary className="cursor-pointer select-none text-slate-300">Data sources and freshness</summary>
+            <ul className="mt-2 space-y-1">
+              <li>League, rosters, scoring, matchups, transactions: Sleeper (1-5 minutes behind)</li>
+              <li>Projections: Sleeper and ESPN, averaged</li>
+              <li>Injury designations: ESPN (every 15 minutes) layered on Sleeper</li>
+              <li>
+                Snaps, first reads, red zone, xFP, Next Gen Stats, practice reports, team PROE and pace, defensive and O-line starters, rest days: nflverse
+                {nfl ? ` (through week ${nfl.throughWeek}, updated ${new Date(nfl.updated).toLocaleString()})` : " (not loaded)"}
+              </li>
+              <li>Trade market values: FantasyCalc (every 6 hours){model && !hasValues(model) ? " (not loaded)" : ""}</li>
+              <li>Schedule, Vegas lines: ESPN · Weather: Open-Meteo · News: ESPN / Rotowire</li>
+            </ul>
+            <p className="mt-2">Data: nflverse (CC-BY 4.0), FTN Data via nflverse (CC-BY-SA 4.0), ffopportunity, DynastyProcess.</p>
+          </details>
         </div>
 
         <div className="mt-6 flex flex-wrap justify-end gap-2">
@@ -146,4 +218,9 @@ export default function Settings({ onClose }: { onClose: () => void }) {
       </div>
     </div>
   );
+}
+
+function hasValues(m: NonNullable<ReturnType<typeof useLeague>["model"]>) {
+  for (const v of m.views.values()) if (v.market) return true;
+  return false;
 }

@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { LeagueModel, PlayerView } from "@/lib/model";
 import { Delta, Empty, InjuryTag, Panel, PosTag } from "./ui";
+import { usePlayerDrawer } from "./PlayerDrawer";
 
 const POS_ORDER: Record<string, number> = { QB: 0, RB: 1, WR: 2, TE: 3, K: 4, DEF: 5 };
 
@@ -14,6 +15,7 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
 
   const me = model.team(myId)!;
   const partner = model.team(partnerId);
+  const profile = useMemo(() => (partner && model.activity ? model.managerProfile(partner.rosterId) : null), [model, partner]);
 
   const sortRoster = (ids: string[]) =>
     ids
@@ -55,6 +57,8 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
         )}
       </div>
 
+      {profile && <p className="-mt-3 text-xs text-slate-400">{profile.summary}</p>}
+
       <div className="grid gap-6 lg:grid-cols-2">
         <RosterPicker title={`You send (${me.teamName})`} players={sortRoster(me.players)} selected={give} onToggle={(id) => toggle(give, setGive, id)} tone="rose" />
         <RosterPicker title={`You get (${partner?.teamName ?? ""})`} players={sortRoster(partner?.players ?? [])} selected={get} onToggle={(id) => toggle(get, setGet, id)} tone="lime" />
@@ -93,6 +97,23 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
                 ))}
               </div>
             </div>
+
+            {result.market && (
+              <div className="rounded-lg border border-white/10 bg-black/30 p-3 text-sm">
+                <div className="hud-title mb-2">Market value check (FantasyCalc)</div>
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-1 font-mono">
+                  <span className="text-slate-400">
+                    You send <span className="text-rose-300">{result.market.give.toLocaleString()}</span>
+                  </span>
+                  <span className="text-slate-400">
+                    You get <span className="text-lime-300">{result.market.get.toLocaleString()}</span>
+                  </span>
+                  <span className="text-xs text-slate-500">
+                    {result.market.ratio >= 1.1 ? "They come out ahead on value" : result.market.ratio >= 0.9 ? "Fair by market value" : "You come out ahead on value"}
+                  </span>
+                </div>
+              </div>
+            )}
 
             {(result.flags.length > 0 || result.myDrops.length > 0 || result.theirDrops.length > 0) && (
               <ul className="space-y-1.5 text-sm text-slate-300">
@@ -140,6 +161,7 @@ function RosterPicker({
   tone: "rose" | "lime";
 }) {
   const sel = tone === "rose" ? "border-rose-400/60 bg-rose-500/10" : "border-lime-400/60 bg-lime-500/10";
+  const { open } = usePlayerDrawer();
   return (
     <Panel title={title}>
       <div className="max-h-[420px] space-y-1 overflow-y-auto pr-1">
@@ -156,6 +178,24 @@ function RosterPicker({
               <span className="text-xs text-slate-500">{v.p.team}</span>
               <InjuryTag status={v.p.injury} />
               <span className="ml-auto font-mono text-xs text-slate-400">{v.rosPoints.toFixed(0)} ROS</span>
+              <span
+                role="button"
+                tabIndex={0}
+                aria-label={`Open ${v.p.name}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  open(v.p.id);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.stopPropagation();
+                    open(v.p.id);
+                  }
+                }}
+                className="grid h-6 w-6 place-items-center rounded-full border border-white/10 text-[11px] text-slate-400 hover:border-cyan-300/50 hover:text-cyan-200"
+              >
+                i
+              </span>
             </button>
           );
         })}

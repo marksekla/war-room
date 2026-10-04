@@ -5,8 +5,14 @@
 // actual starting lineup gains, not on raw rankings.
 
 import type {
+  EspnInjury,
   Game,
+  LeagueActivity,
   LeagueBundle,
+  MarketValue,
+  NflData,
+  NflPlayer,
+  NflTeamEnv,
   Player,
   PlayerMap,
   Position,
@@ -48,6 +54,44 @@ export interface PlayerView {
   carryShare: number | null; // season
   trend: number; // last game pts minus season ppg
   trendingAdds: number;
+  /** nflverse advanced usage (snaps, first reads, red zone, xFP, NGS, practice report). */
+  adv: NflPlayer | null;
+  /** FantasyCalc redraft trade value. */
+  market: MarketValue | null;
+  /** Latest ESPN injury entry, if any. */
+  espn: EspnInjury | null;
+  /** This week's projection from each source (league scoring). projNext is their average. */
+  projSleeper: number | null;
+  projEspn: number | null;
+}
+
+export interface Extras {
+  nfl?: NflData | null;
+  values?: Record<string, MarketValue> | null;
+  injuries?: EspnInjury[] | null;
+  activity?: LeagueActivity | null;
+  espnProj?: Record<string, StatLine> | null;
+}
+
+export interface UnitOut {
+  name: string;
+  pos: string;
+  status: string;
+  snapPct: number;
+}
+
+export interface ManagerProfile {
+  rosterId: number;
+  tradesThisSeason: number;
+  tradesLastSeason: number;
+  waiverClaims: number;
+  freeAgentAdds: number;
+  faabSpent: number;
+  bought: Record<string, number>; // positions acquired in trades
+  sold: Record<string, number>;
+  activityRank: number; // 1 = most active
+  lastMove: number | null;
+  summary: string;
 }
 
 export interface GameInfo {
@@ -66,8 +110,16 @@ export const FLEX_SLOTS: Record<string, Position[]> = {
   IDP_FLEX: [],
 };
 
-const OUT_STATUSES = new Set(["Out", "IR", "PUP", "Sus", "NA", "COV", "DNR"]);
 const LONG_TERM = new Set(["IR", "PUP", "Sus", "NA"]);
+const ESPN_STATUS: Record<string, string> = {
+  Out: "Out",
+  Doubtful: "Doubtful",
+  Questionable: "Questionable",
+  "Injured Reserve": "IR",
+  "Physically Unable to Perform": "PUP",
+  Suspension: "Sus",
+};
+const SEVERITY: Record<string, number> = { Questionable: 1, Doubtful: 2, Out: 3, IR: 4, PUP: 4, Sus: 4, NA: 4 };
 
 export function scoreLine(s: StatLine | undefined, scoring: Record<string, number>): number {
   if (!s) return 0;
@@ -97,7 +149,13 @@ export class LeagueModel {
   readonly views = new Map<string, PlayerView>();
   readonly dvp = new Map<string, Map<Position, { allowed: number; rank: number; factor: number }>>();
   readonly replacement = new Map<Position, number>();
+  readonly nfl: NflData | null;
   private gamesByTeamWeek = new Map<string, GameInfo>();
+  private advBySleeper = new Map<string, NflPlayer>();
+  private advByGsis = new Map<string, NflPlayer>();
+  private espnById = new Map<string, EspnInjury>();
+  private espnByName = new Map<string, EspnInjury>();
+  readonly activity: LeagueActivity | null;
 
   constructor(
     readonly bundle: LeagueBundle,
@@ -105,7 +163,8 @@ export class LeagueModel {
     readonly stats: WeekStats[],
     readonly projections: WeekProjections[],
     readonly schedule: Schedule,
-    readonly trending: { add: { player_id: string; count: number }[] }
+    readonly trending: { add: { player_id: string; count: number }[] },
+    readonly extras: Extras = {}
   ) {
     const { league, users, rosters, state } = bundle;
     this.scoring = league.scoring_settings ?? {};
@@ -159,8 +218,48 @@ export class LeagueModel {
       });
     }
 
+    this.nfl = extras.nfl ?? null;
+    this.activity = extras.activity ?? null;
+    for (const [gsis, a] of Object.entries(this.nfl?.players ?? {})) {
+      this.advByGsis.set(gsis, a);
+      if (a.sid) this.advBySleeper.set(a.sid, a);
+    }
+    for (const i of extras.injuries ?? []) {
+      if (i.espnId) this.espnById.set(i.espnId, i);
+      if (i.name) this.espnByName.set(`${normName(i.name)}:${i.team ?? ""}`, i);
+    }
+
     this.buildDvp();
     this.buildViews();
+  }
+
+  // ---------- advanced data ----------
+
+  teamEnv(team: string | null): NflTeamEnv | null {
+    return team ? this.nfl?.teams[team] ?? null : null;
+  }
+
+  private advFor(p: Player): NflPlayer | null {
+    return this.advBySleeper.get(p.id) ?? (p.gsis ? this.advByGsis.get(p.gsis) : undefined) ?? null;
+  }
+
+  private espnFor(p: Player): EspnInjury | null {
+    return (p.espnId ? this.espnById.get(p.espnId) : undefined) ?? this.espnByName.get(`${normName(p.name)}:${p.team ?? ""}`) ?? null;
+  }
+
+  /**
+   * Sleeper's injury field can lag a few hours. ESPN's injury feed refreshes every
+   * 15 minutes, so a recent ESPN game designation wins when it is more serious.
+   */
+  private effectiveInjury(p: Player, e: EspnInjury | null): string | null {
+    if (!e) return p.injury;
+    const mapped = ESPN_STATUS[e.status];
+    if (!mapped) return p.injury;
+    const ageDays = e.date ? (Date.now() - new Date(e.date).getTime()) / 86_400_000 : 99;
+    const fresh = LONG_TERM.has(mapped) ? ageDays < 60 : ageDays < 8;
+    if (!fresh) return p.injury;
+    if (!p.injury || (SEVERITY[mapped] ?? 0) > (SEVERITY[p.injury] ?? 0)) return mapped;
+    return p.injury;
   }
 
   // ---------- lookups ----------
@@ -260,7 +359,11 @@ export class LeagueModel {
     const projByWeek = new Map(this.projections.map((p) => [p.week, p]));
     const trend = new Map(this.trending.add.map((t) => [t.player_id, t.count]));
 
-    for (const p of Object.values(this.players)) {
+    for (const raw of Object.values(this.players)) {
+      const espn = raw.pos === "DEF" ? null : this.espnFor(raw);
+      const injury = this.effectiveInjury(raw, espn);
+      const p: Player = injury === raw.injury ? raw : { ...raw, injury, injuryPart: raw.injuryPart ?? espn?.body ?? null };
+      const adv = raw.pos === "DEF" || raw.pos === "K" ? null : this.advFor(raw);
       const log: GameLog[] = [];
       for (const wk of this.stats) {
         const line = wk.lines[p.id];
@@ -291,7 +394,14 @@ export class LeagueModel {
       const ppg = avg(pts);
       const last3 = avg(pts.slice(-3));
       const next = projByWeek.get(this.week)?.lines[p.id];
-      const projNext = next ? scoreLine(next.s, this.scoring) : null;
+      const projSleeper = next ? scoreLine(next.s, this.scoring) : null;
+      const espnLine = raw.espnId ? this.extras.espnProj?.[raw.espnId] : undefined;
+      const projEspn = espnLine ? scoreLine(espnLine, this.scoring) : null;
+      // Two projection sources averaged beat either one alone.
+      const projNext =
+        projSleeper != null && projEspn != null && projSleeper > 0 && projEspn > 0
+          ? (projSleeper + projEspn) / 2
+          : projSleeper ?? projEspn;
 
       let valuePg: number;
       if (log.length >= 2) {
@@ -300,6 +410,14 @@ export class LeagueModel {
         valuePg = projNext != null && projNext > 0 ? 0.65 * projNext + 0.35 * ppg : ppg * 0.85;
       } else {
         valuePg = projNext ?? 0;
+      }
+      // Opportunity is stickier than efficiency: lean slightly toward expected points
+      // (xFP, from nflverse/ffopportunity), converted to this league's scoring.
+      const xfp = adv?.s?.xfp;
+      const fpPpr = adv?.s?.fp;
+      if (xfp && log.length >= 2 && ["RB", "WR", "TE"].includes(p.pos)) {
+        const conv = fpPpr && fpPpr > 2 && ppg > 0 ? Math.max(0.6, Math.min(1.4, ppg / fpPpr)) : 1;
+        valuePg = 0.85 * valuePg + 0.15 * xfp * conv;
       }
 
       const lastGame = log[log.length - 1];
@@ -320,11 +438,21 @@ export class LeagueModel {
         vorp: 0,
         rosPoints: 0,
         bye: p.team ? this.schedule.byes[p.team] ?? null : null,
-        snapShare: lastGame && lastGame.teamSnaps ? lastGame.snaps / lastGame.teamSnaps : null,
+        snapShare:
+          lastGame && lastGame.teamSnaps
+            ? lastGame.snaps / lastGame.teamSnaps
+            : adv?.wk.length
+              ? adv.wk[adv.wk.length - 1][1]
+              : null,
         targetShare: tgtTeam ? tgtSum / tgtTeam : null,
         carryShare: carTeam ? carSum / carTeam : null,
         trend: lastGame ? round1(lastGame.pts - ppg) : 0,
         trendingAdds: trend.get(p.id) ?? 0,
+        adv,
+        market: this.extras.values?.[p.id] ?? null,
+        espn,
+        projSleeper: projSleeper == null ? null : round1(projSleeper),
+        projEspn: projEspn == null ? null : round1(projEspn),
       });
     }
 
@@ -538,8 +666,22 @@ export class LeagueModel {
 
     const verdict =
       myDelta > 12 ? "Win for you" : myDelta > 3 ? "Slight win for you" : myDelta >= -3 ? "Even" : myDelta >= -12 ? "Slight loss for you" : "Loss for you";
-    const acceptance =
-      theirDelta > 5 ? "Likely" : theirDelta >= -3 ? "Coin flip" : theirDelta >= -12 ? "Unlikely" : "Very unlikely";
+
+    // Market check (FantasyCalc values come from real trades). Stars get a premium,
+    // so values are raised to a power before summing, like most trade calculators.
+    const mv = (ids: string[]) => ids.map((id) => this.views.get(id)?.market?.value ?? 0);
+    const giveVals = mv(give);
+    const getVals = mv(get);
+    const adj = (vals: number[]) => vals.reduce((a, v) => a + Math.pow(Math.max(0, v), 1.3), 0);
+    const hasMarket = giveVals.some((v) => v > 0) && getVals.some((v) => v > 0);
+    const marketRatio = hasMarket ? adj(giveVals) / Math.max(1, adj(getVals)) : null; // >1 = they receive more value
+    const lineupScore = theirDelta > 5 ? 1 : theirDelta >= -3 ? 0 : theirDelta >= -12 ? -1 : -2;
+    const marketScore =
+      marketRatio == null ? null : marketRatio >= 1.1 ? 1 : marketRatio >= 0.9 ? 0 : marketRatio >= 0.75 ? -1 : -2;
+    const score = marketScore == null ? lineupScore * 2 : lineupScore + marketScore;
+    const acceptance = score >= 1 ? "Likely" : score >= 0 ? "Coin flip" : score >= -2 ? "Unlikely" : "Very unlikely";
+    if (marketRatio != null && marketRatio < 0.8) flags.push("By market trade value you are asking for a lot more than you give. Expect pushback.");
+    if (marketRatio != null && marketRatio > 1.25) flags.push("By market trade value you are overpaying. You may be able to ask for more.");
 
     return {
       myDelta,
@@ -550,6 +692,9 @@ export class LeagueModel {
       verdict,
       acceptance,
       best: best ? { name: best.p.name, side: bestSide } : null,
+      market: hasMarket
+        ? { give: Math.round(giveVals.reduce((a, b) => a + b, 0)), get: Math.round(getVals.reduce((a, b) => a + b, 0)), ratio: Math.round(marketRatio! * 100) / 100 }
+        : null,
       myDrops: myTrim.drops,
       theirDrops: theirTrim.drops,
       flags,
@@ -588,6 +733,144 @@ export class LeagueModel {
       .sort((a, b) => a!.rosPoints - b!.rosPoints) as PlayerView[];
   }
 
+  // ---------- head-to-head ----------
+
+  /** This week's fantasy opponent from Sleeper matchups. */
+  opponentOf(rosterId: number): Team | null {
+    const rows = this.activity?.matchups ?? [];
+    const mine = rows.find((r) => r.rosterId === rosterId);
+    if (!mine || mine.matchupId == null) return null;
+    const opp = rows.find((r) => r.matchupId === mine.matchupId && r.rosterId !== rosterId);
+    return opp ? this.team(opp.rosterId) ?? null : null;
+  }
+
+  /** Projected score for both teams and a rough win probability (normal approximation). */
+  headToHead(rosterId: number, week = this.week) {
+    const opp = this.opponentOf(rosterId);
+    const me = this.team(rosterId);
+    if (!opp || !me) return null;
+    const mine = this.teamWeekPoints(me.players, week);
+    const theirs = this.teamWeekPoints(opp.players, week);
+    const sd = (x: number) => Math.max(15, 0.22 * x);
+    const z = (mine - theirs) / Math.sqrt(sd(mine) ** 2 + sd(theirs) ** 2);
+    const live = this.activity?.matchups.filter((r) => r.rosterId === rosterId || r.rosterId === opp.rosterId) ?? [];
+    return {
+      opponent: opp,
+      myProj: round1(mine),
+      oppProj: round1(theirs),
+      winProb: Math.round(normCdf(z) * 100),
+      liveMine: live.find((r) => r.rosterId === rosterId)?.points ?? 0,
+      liveTheirs: live.find((r) => r.rosterId === opp.rosterId)?.points ?? 0,
+    };
+  }
+
+  // ---------- league activity ----------
+
+  managerProfile(rosterId: number): ManagerProfile {
+    const tx = this.activity?.transactions ?? [];
+    const t = this.team(rosterId);
+    const mine = tx.filter((x) => x.rosterIds.includes(rosterId));
+    const trades = mine.filter((x) => x.type === "trade");
+    const bought: Record<string, number> = {};
+    const sold: Record<string, number> = {};
+    for (const tr of trades) {
+      for (const [pid, r] of Object.entries(tr.adds)) if (r === rosterId) bought[this.players[pid]?.pos ?? "?"] = (bought[this.players[pid]?.pos ?? "?"] ?? 0) + 1;
+      for (const [pid, r] of Object.entries(tr.drops)) if (r === rosterId) sold[this.players[pid]?.pos ?? "?"] = (sold[this.players[pid]?.pos ?? "?"] ?? 0) + 1;
+    }
+    const waivers = mine.filter((x) => x.type === "waiver" && Object.values(x.adds).includes(rosterId));
+    const fas = mine.filter((x) => x.type === "free_agent" && Object.values(x.adds).includes(rosterId));
+    const faab = waivers.reduce((a, x) => a + (x.bid ?? 0), 0);
+    const lastSeason = (this.activity?.lastSeasonTrades ?? []).filter((x) => t?.ownerId && x.ownerIds.includes(t.ownerId)).length;
+    const moves = (id: number) => (this.activity?.transactions ?? []).filter((x) => x.rosterIds.includes(id)).length;
+    const activityRank = this.teams.map((x) => moves(x.rosterId)).filter((n) => n > mine.length).length + 1;
+    const fmt = (o: Record<string, number>) =>
+      Object.entries(o)
+        .sort((a, b) => b[1] - a[1])
+        .map(([pos, n]) => `${n} ${pos}`)
+        .join(", ");
+    const bits = [
+      `${trades.length} trade${trades.length === 1 ? "" : "s"} this season${lastSeason ? ` (${lastSeason} last season)` : ""}`,
+      trades.length ? `bought ${fmt(bought) || "-"}; sold ${fmt(sold) || "-"}` : null,
+      `${waivers.length + fas.length} adds${faab ? `, $${faab} FAAB spent` : ""}`,
+      `#${activityRank} most active`,
+    ].filter(Boolean);
+    return {
+      rosterId,
+      tradesThisSeason: trades.length,
+      tradesLastSeason: lastSeason,
+      waiverClaims: waivers.length,
+      freeAgentAdds: fas.length,
+      faabSpent: faab,
+      bought,
+      sold,
+      activityRank,
+      lastMove: mine[0]?.created ?? null,
+      summary: bits.join(" · "),
+    };
+  }
+
+  /** Recent league moves in plain words, newest first. */
+  recentMoves(limit = 12) {
+    const name = (id: string) => this.players[id]?.name ?? (id.match(/^[A-Z]{2,3}$/) ? `${id} DEF` : "Unknown");
+    return (this.activity?.transactions ?? []).slice(0, limit).map((x) => {
+      if (x.type === "trade") {
+        const parts = x.rosterIds.map((r) => {
+          const got = Object.entries(x.adds)
+            .filter(([, to]) => to === r)
+            .map(([pid]) => name(pid));
+          return `${this.team(r)?.teamName ?? r} gets ${got.join(", ") || (x.picks ? "draft picks" : "nothing")}`;
+        });
+        return { created: x.created, week: x.week, type: "trade", teams: x.rosterIds, text: parts.join(" | ") };
+      }
+      const r = x.rosterIds[0];
+      const adds = Object.keys(x.adds).map(name);
+      const drops = Object.keys(x.drops).map(name);
+      const text = [adds.length ? `adds ${adds.join(", ")}${x.bid ? ` ($${x.bid})` : ""}` : null, drops.length ? `drops ${drops.join(", ")}` : null]
+        .filter(Boolean)
+        .join(", ");
+      return { created: x.created, week: x.week, type: x.type, teams: [r], text: `${this.team(r)?.teamName ?? r} ${text}` };
+    });
+  }
+
+  // ---------- trenches: defenders and linemen out ----------
+
+  /** Regular starters (60%+ of snaps) on a team's defense or O-line who are hurt this week. */
+  unitOut(team: string | null, unit: "def" | "ol"): UnitOut[] {
+    if (!team) return [];
+    const list = this.nfl?.starters?.[team]?.[unit] ?? [];
+    const reportIsCurrent = this.nfl?.startersReportWeek === this.week;
+    const out: UnitOut[] = [];
+    for (const s of list) {
+      const e = this.espnByName.get(`${normName(s.n)}:${team}`);
+      let status: string | null = null;
+      if (e) {
+        const mapped = ESPN_STATUS[e.status];
+        const age = e.date ? (Date.now() - new Date(e.date).getTime()) / 86_400_000 : 99;
+        if (mapped && (LONG_TERM.has(mapped) ? age < 60 : age < 8)) status = mapped;
+      }
+      if (!status && reportIsCurrent && s.rep && ["Out", "Doubtful", "Questionable"].includes(s.rep)) status = s.rep;
+      if (status) out.push({ name: s.n, pos: s.pos, status, snapPct: Math.round(s.pct * 100) });
+    }
+    return out;
+  }
+
+  /** Rest days, surface and other game context from the nflverse schedule. */
+  gameContext(team: string | null, week: number) {
+    if (!team) return null;
+    const g = this.nfl?.games.find((x) => x.w === week && (x.h === team || x.a === team));
+    if (!g) return null;
+    const home = g.h === team;
+    return {
+      rest: (home ? g.hr : g.ar) ?? null,
+      oppRest: (home ? g.ar : g.hr) ?? null,
+      surface: g.surf ?? null,
+      roof: g.roof,
+      divisional: !!g.div,
+      neutralSite: !!g.neutral,
+      stadium: g.st,
+    };
+  }
+
   // ---------- start / sit ----------
 
   startSit(myId: number, week = this.week) {
@@ -611,6 +894,11 @@ export class LeagueModel {
         warnings.push(`${v.p.name} is on bye.`);
         continue;
       }
+      const pr = v.adv?.prac;
+      if (pr && pr.w === week && pr.st === "DNP" && !v.p.injury && !/rest|not injury/i.test(pr.inj ?? ""))
+        warnings.push(`${v.p.name} did not practice (${pr.inj ?? "injury"}) on the latest report. Watch for a designation.`);
+      if (pr && pr.w >= week - 1 && pr.wks >= 3 && pr.inj && !/rest|not injury/i.test(pr.inj))
+        warnings.push(`${v.p.name} has been on the injury report ${pr.wks} weeks with ${pr.inj}. Recurring issue.`);
       if (v.p.injury === "Questionable" || v.p.injury === "Doubtful") {
         const kick = new Date(g.game.kickoff).getTime();
         const eligible = f.slot in FLEX_SLOTS ? FLEX_SLOTS[f.slot] : [f.slot as Position];
@@ -628,6 +916,18 @@ export class LeagueModel {
     }
     return { lineup: lu, rows, warnings };
   }
+}
+
+/** Standard normal CDF (Abramowitz-Stegun approximation). */
+function normCdf(z: number) {
+  const t = 1 / (1 + 0.2316419 * Math.abs(z));
+  const d = 0.3989423 * Math.exp((-z * z) / 2);
+  const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+  return z > 0 ? 1 - p : p;
+}
+
+function normName(n: string) {
+  return n.toLowerCase().replace(/\b(jr|sr|ii|iii|iv|v)\b/g, "").replace(/[^a-z]/g, "");
 }
 
 export function fmtKick(iso: string) {

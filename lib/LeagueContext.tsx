@@ -2,8 +2,20 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { LeagueModel } from "./model";
-import type { AiSettings, LeagueBundle, PlayerMap, Schedule, WeekProjections, WeekStats } from "./types";
-import { DEFAULT_STRATEGY } from "./agent/strategy";
+import type {
+  AiSettings,
+  EspnInjury,
+  LeagueActivity,
+  LeagueBundle,
+  MarketValue,
+  NflData,
+  PlayerMap,
+  Schedule,
+  StatLine,
+  WeekProjections,
+  WeekStats,
+} from "./types";
+import { DEFAULT_STRATEGY, LEGACY_STRATEGIES } from "./agent/strategy";
 
 const LS = "war-room:v1";
 
@@ -18,7 +30,7 @@ const defaultSaved: Saved = {
   leagueId: "",
   rosterId: null,
   username: "",
-  ai: { provider: "anthropic", apiKey: "", model: "", webSearch: true, strategy: DEFAULT_STRATEGY },
+  ai: { provider: "anthropic", apiKey: "", keys: {}, model: "", baseUrl: "", webSearch: true, strategy: DEFAULT_STRATEGY },
 };
 
 function loadSaved(): Saved {
@@ -26,7 +38,11 @@ function loadSaved(): Saved {
     const raw = localStorage.getItem(LS);
     if (!raw) return defaultSaved;
     const parsed = JSON.parse(raw) as Partial<Saved>;
-    return { ...defaultSaved, ...parsed, ai: { ...defaultSaved.ai, ...(parsed.ai ?? {}) } };
+    const ai = { ...defaultSaved.ai, ...(parsed.ai ?? {}) };
+    // Older saves only had one key: remember it under its provider.
+    if (ai.apiKey && !ai.keys?.[ai.provider]) ai.keys = { ...(ai.keys ?? {}), [ai.provider]: ai.apiKey };
+    if (LEGACY_STRATEGIES.some((l) => l.trim() === (ai.strategy ?? "").trim())) ai.strategy = DEFAULT_STRATEGY;
+    return { ...defaultSaved, ...parsed, ai };
   } catch {
     return defaultSaved;
   }
@@ -89,17 +105,26 @@ export function LeagueProvider({ children }: { children: React.ReactNode }) {
         const season = Number(bundle.league.season || bundle.state.season);
         const week = Math.max(1, Math.min(18, Number(bundle.state.week) || 1));
         const statWeeks = Array.from({ length: week }, (_, i) => i + 1);
-        setProgress("Loading players, stats and schedule");
-        const [players, stats, projections, schedule, trending] = await Promise.all([
+        const lg = bundle.league;
+        const superflex = lg.roster_positions.includes("SUPER_FLEX") || lg.roster_positions.filter((r) => r === "QB").length > 1;
+        const ppr = lg.scoring_settings?.rec ?? 1;
+        setProgress("Loading players, stats, schedule and advanced data");
+        const [players, stats, projections, schedule, trending, nfl, values, injuries, activity, espnProj] = await Promise.all([
           api<PlayerMap>(`/api/players`),
           api<WeekStats[]>(`/api/stats?season=${season}&weeks=${statWeeks.join(",")}&current=${week}`),
           api<WeekProjections[]>(`/api/projections?season=${season}&weeks=${week},${Math.min(18, week + 1)}`),
           api<Schedule>(`/api/schedule?season=${season}`),
           api<{ add: { player_id: string; count: number }[] }>(`/api/trending`).catch(() => ({ add: [] })),
+          // Optional sources: the app still works if any of these are down.
+          api<NflData>(`/api/nfl`).catch(() => null),
+          api<Record<string, MarketValue>>(`/api/values?teams=${lg.total_rosters}&sf=${superflex ? 1 : 0}&ppr=${ppr}`).catch(() => null),
+          api<EspnInjury[]>(`/api/injuries`).catch(() => null),
+          api<LeagueActivity>(`/api/activity?id=${saved.leagueId}&week=${week}`).catch(() => null),
+          api<Record<string, StatLine>>(`/api/espn-proj?season=${season}&week=${week}`).catch(() => null),
         ]);
         if (cancelled) return;
         setProgress("Running the numbers");
-        const m = new LeagueModel(bundle, players, stats, projections, schedule, trending);
+        const m = new LeagueModel(bundle, players, stats, projections, schedule, trending, { nfl, values, injuries, activity, espnProj });
         setModel(m);
         if (saved.rosterId == null || !m.team(saved.rosterId)) {
           const guess = saved.username

@@ -104,7 +104,7 @@ export default function Onboarding({ onOpenSettings }: { onOpenSettings: () => v
         </div>
 
         <p className="mt-6 text-center text-xs text-slate-500">
-          The AI agent needs your own Anthropic or OpenAI key.{" "}
+          The AI agent needs your own AI key (Claude, GPT, or a free Gemini key).{" "}
           <button className="text-cyan-300 underline" onClick={onOpenSettings}>
             Add it in Settings
           </button>

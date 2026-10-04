@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import type { LeagueModel } from "@/lib/model";
 import type { Position } from "@/lib/types";
 import { Delta, Empty, InjuryTag, Meter, Panel, PosTag, RankChip } from "./ui";
+import { PlayerName } from "./PlayerDrawer";
 
 const FILTERS: (Position | "ALL")[] = ["ALL", "RB", "WR", "TE", "QB", "K", "DEF"];
 
@@ -77,7 +78,7 @@ export default function Waivers({ model, myId }: { model: LeagueModel; myId: num
                       <td>
                         <div className="flex items-center gap-2">
                           <PosTag pos={v.p.pos} />
-                          <span className="max-w-[130px] truncate font-medium text-slate-100 sm:max-w-none">{v.p.name}</span>
+                          <PlayerName v={v} className="max-w-[130px] sm:max-w-none" />
                           <span className="hidden text-xs text-slate-500 sm:inline">{v.p.team}</span>
                           <InjuryTag status={v.p.injury} />
                         </div>
@@ -108,7 +109,7 @@ export default function Waivers({ model, myId }: { model: LeagueModel; myId: num
         )}
       </Panel>
       <p className="text-xs text-slate-500">
-        Numbers come from usage and projections and lag breaking news. Ask the AI agent to check injuries and depth-chart changes before you claim anyone.
+        Tap a name for snap trends, red zone work, expected points and news. Numbers lag breaking news, so ask the AI agent before you claim anyone.
       </p>
     </div>
   );

@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import type { LeagueModel, PlayerView } from "@/lib/model";
 import { Delta, InjuryTag, Meter, Panel, PosTag, RankChip, Stat } from "./ui";
+import { PlayerName } from "./PlayerDrawer";
 
 const POS_ORDER: Record<string, number> = { QB: 0, RB: 1, WR: 2, TE: 3, K: 4, DEF: 5 };
 
@@ -23,6 +24,8 @@ export default function Dashboard({ model, myId }: { model: LeagueModel; myId: n
   const starterIds = new Set(lineupNow.filled.map((f) => f.id));
   const rank = standings.findIndex((t) => t.rosterId === myId) + 1;
   const pfRank = model.teams.slice().sort((a, b) => b.pf - a.pf).findIndex((t) => t.rosterId === myId) + 1;
+  const h2h = useMemo(() => model.headToHead(myId), [model, myId]);
+  const moves = useMemo(() => model.recentMoves(10), [model]);
 
   const byeWeeks = model.remainingWeeks();
   const startersByPosPerWeek = byeWeeks.map((w) => {
@@ -36,7 +39,12 @@ export default function Dashboard({ model, myId }: { model: LeagueModel; myId: n
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="Record" value={`${me.wins}-${me.losses}${me.ties ? `-${me.ties}` : ""}`} sub={`#${rank} of ${model.teams.length} in standings`} />
         <Stat label="Points for" value={me.pf.toFixed(1)} sub={`#${pfRank} in league`} tone="violet" />
-        <Stat label={`Week ${model.week} projection`} value={lineupNow.total.toFixed(1)} sub="Best lineup, matchup-adjusted" tone="lime" />
+        <Stat
+          label={`Week ${model.week} projection`}
+          value={lineupNow.total.toFixed(1)}
+          sub={h2h ? `vs ${h2h.opponent.teamName} ${h2h.oppProj.toFixed(1)} · ${h2h.winProb}% to win` : "Best lineup, matchup-adjusted"}
+          tone="lime"
+        />
         <Stat
           label="Waiver priority"
           value={me.waiverPosition ?? "-"}
@@ -72,7 +80,7 @@ export default function Dashboard({ model, myId }: { model: LeagueModel; myId: n
                     <td>
                       <div className="flex items-center gap-2">
                         <PosTag pos={v.p.pos} />
-                        <span className="max-w-[130px] truncate font-medium text-slate-100 sm:max-w-none">{v.p.name}</span>
+                        <PlayerName v={v} className="max-w-[130px] sm:max-w-none" />
                         <span className="hidden text-xs text-slate-500 sm:inline">{v.p.team}</span>
                         <InjuryTag status={v.p.injury} />
                         {starterIds.has(v.p.id) && <span className="hidden text-[10px] text-cyan-300/70 sm:inline">START</span>}
@@ -103,7 +111,7 @@ export default function Dashboard({ model, myId }: { model: LeagueModel; myId: n
           </table>
         </div>
         <p className="mt-3 text-xs text-slate-500">
-          Opponent chip: rank vs that position this season (1 = toughest, 32 = easiest). Faded rows are bench. Shares are season-long.
+          Tap a name for the full player card (usage, practice report, team environment, news). Opponent chip: rank vs that position (1 = toughest, 32 = easiest). Faded rows are bench.
         </p>
       </Panel>
 
@@ -189,6 +197,25 @@ export default function Dashboard({ model, myId }: { model: LeagueModel; myId: n
           Starter strength rank by position (1 = strongest). Target teams whose needs match your surplus.
         </p>
       </Panel>
+
+      {moves.length > 0 && (
+        <Panel title="League wire">
+          <ul className="divide-y divide-white/5">
+            {moves.map((mv, i) => (
+              <li key={i} className="flex items-start gap-3 py-2 text-sm">
+                <span
+                  className={`mt-0.5 w-5 shrink-0 text-center ${mv.type === "trade" ? "text-fuchsia-300" : mv.type === "waiver" ? "text-cyan-300" : "text-slate-400"}`}
+                  title={mv.type}
+                >
+                  {mv.type === "trade" ? "⇄" : mv.type === "waiver" ? "⊕" : "+"}
+                </span>
+                <span className={`min-w-0 flex-1 ${mv.teams.includes(myId) ? "text-cyan-100" : "text-slate-300"}`}>{mv.text}</span>
+                <span className="shrink-0 font-mono text-[11px] text-slate-500">W{mv.week}</span>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      )}
     </div>
   );
 }

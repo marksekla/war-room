@@ -42,7 +42,7 @@ export default function Chat({
     const q = text.trim();
     if (!q || busy) return;
     if (!saved.ai.apiKey) {
-      setErr("Add your Anthropic or OpenAI API key in Settings to use the agent.");
+      setErr("Add an AI key in Settings to use the agent. Gemini keys from Google AI Studio are free.");
       return;
     }
     setErr(null);
@@ -77,7 +77,7 @@ export default function Chat({
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <h1 className="font-display text-xl font-bold tracking-widest neon-text">AI AGENT</h1>
         <span className="rounded-full border border-fuchsia-400/30 bg-fuchsia-500/10 px-2.5 py-0.5 font-mono text-[11px] text-fuchsia-200">
-          {provider.label} · {saved.ai.model || provider.defaultModel}
+          {provider.label} · {saved.ai.model || provider.defaultModel || "auto"}
         </span>
         {messages.length > 0 && (
           <button className="btn btn-ghost ml-auto" onClick={() => setMessages([])}>New chat</button>
@@ -91,10 +91,10 @@ export default function Chat({
               <span className="font-display text-2xl neon-text">✦</span>
             </div>
             <p className="text-sm text-slate-400">
-              Your agent has your whole league loaded: rosters, league scoring, usage, matchups, Vegas lines and a trade simulator. It searches the web for injury news when it matters.
+              Your agent has your whole league loaded: rosters, league scoring, usage, snap and first-read shares, red zone work, practice reports, team pass rates, matchups, Vegas lines, weather, market trade values and a trade simulator. It checks news before it answers.
             </p>
             {!saved.ai.apiKey && (
-              <button className="btn btn-violet mt-4" onClick={openSettings}>Add your API key to start</button>
+              <button className="btn btn-violet mt-4" onClick={openSettings}>Add an AI key to start (Gemini is free)</button>
             )}
             <div className="mt-6 grid w-full gap-2 md:grid-cols-2">
               {SUGGESTIONS.map((s) => (
