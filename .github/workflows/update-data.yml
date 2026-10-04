@@ -1,0 +1,42 @@
+# Rebuilds data/nfl.json from free nflverse data twice a day and commits it.
+name: Update NFL data
+
+on:
+  schedule:
+    - cron: "17 11 * * *" # ~7am ET
+    - cron: "43 23 * * *" # ~7pm ET (after practice reports)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-nfl-data
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install pandas
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet pandas
+
+      - name: Build data
+        run: .venv/bin/python scripts/build_nfl_data.py
+
+      - name: Commit if changed
+        run: |
+          if git diff --quiet -- data/nfl.json; then
+            echo "No changes"
+            exit 0
+          fi
+          git config user.name "${{ github.repository_owner }}"
+          git config user.email "${{ github.repository_owner_id }}+${{ github.repository_owner }}@users.noreply.github.com"
+          git add data/nfl.json
+          git commit -m "Update NFL data"
+          git push
