@@ -1,0 +1,176 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import type { LeagueModel, PlayerView } from "@/lib/model";
+import { Delta, Empty, InjuryTag, Panel, PosTag } from "./ui";
+
+const POS_ORDER: Record<string, number> = { QB: 0, RB: 1, WR: 2, TE: 3, K: 4, DEF: 5 };
+
+export default function Trades({ model, myId, askAgent }: { model: LeagueModel; myId: number; askAgent: (p: string) => void }) {
+  const others = model.teams.filter((t) => t.rosterId !== myId);
+  const [partnerId, setPartnerId] = useState<number>(others[0]?.rosterId ?? 0);
+  const [give, setGive] = useState<string[]>([]);
+  const [get, setGet] = useState<string[]>([]);
+
+  const me = model.team(myId)!;
+  const partner = model.team(partnerId);
+
+  const sortRoster = (ids: string[]) =>
+    ids
+      .map((id) => model.view(id))
+      .filter(Boolean)
+      .sort((a, b) => POS_ORDER[a!.p.pos] - POS_ORDER[b!.p.pos] || b!.rosPoints - a!.rosPoints) as PlayerView[];
+
+  const result = useMemo(
+    () => (give.length && get.length && partner ? model.evaluateTrade(myId, partnerId, give, get) : null),
+    [model, myId, partnerId, give, get, partner]
+  );
+
+  const toggle = (list: string[], set: (x: string[]) => void, id: string) =>
+    set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
+
+  const names = (ids: string[]) => ids.map((id) => model.view(id)?.p.name).join(" + ");
+  const maxAbs = result ? Math.max(1, ...result.perWeek.map((w) => Math.abs(w.me))) : 1;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="hud-title">Trade partner</span>
+        <select
+          className="input w-full sm:w-auto"
+          value={partnerId}
+          onChange={(e) => {
+            setPartnerId(Number(e.target.value));
+            setGet([]);
+          }}
+        >
+          {others.map((t) => (
+            <option key={t.rosterId} value={t.rosterId} className="bg-slate-900">
+              {t.teamName} ({t.ownerName}) {t.wins}-{t.losses}
+            </option>
+          ))}
+        </select>
+        {(give.length > 0 || get.length > 0) && (
+          <button className="btn btn-ghost" onClick={() => { setGive([]); setGet([]); }}>Clear</button>
+        )}
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <RosterPicker title={`You send (${me.teamName})`} players={sortRoster(me.players)} selected={give} onToggle={(id) => toggle(give, setGive, id)} tone="rose" />
+        <RosterPicker title={`You get (${partner?.teamName ?? ""})`} players={sortRoster(partner?.players ?? [])} selected={get} onToggle={(id) => toggle(get, setGet, id)} tone="lime" />
+      </div>
+
+      <Panel title="Simulation" corners>
+        {!result ? (
+          <Empty>Pick at least one player on each side to simulate the trade week by week.</Empty>
+        ) : (
+          <div className="space-y-6">
+            <div className="grid gap-3 md:grid-cols-4">
+              <Big label="Verdict" value={result.verdict} tone={result.myDelta > 3 ? "lime" : result.myDelta < -3 ? "rose" : "cyan"} />
+              <Big label="Your lineup, rest of season" value={<Delta value={result.myDelta} suffix=" pts" />} />
+              <Big label="Next 3 weeks / playoffs" value={<span><Delta value={result.myNearDelta} /> / <Delta value={result.myPlayoffDelta} /></span>} />
+              <Big
+                label="They accept?"
+                value={result.acceptance}
+                sub={<>Their lineup: <Delta value={result.theirDelta} suffix=" pts" /></>}
+                tone={result.acceptance === "Likely" ? "lime" : result.acceptance === "Coin flip" ? "cyan" : "rose"}
+              />
+            </div>
+
+            <div>
+              <div className="hud-title mb-3">Week by week (your lineup change)</div>
+              <div className="flex h-32 items-center gap-1.5">
+                {result.perWeek.map((w) => (
+                  <div key={w.week} className="flex h-full flex-1 flex-col items-center" title={`Week ${w.week}: ${w.me > 0 ? "+" : ""}${w.me}`}>
+                    <div className="flex h-1/2 w-full items-end">
+                      {w.me > 0 && <div className="w-full rounded-t bg-lime-400/70 shadow-[0_0_8px_#a3ff12]" style={{ height: `${(w.me / maxAbs) * 100}%` }} />}
+                    </div>
+                    <div className="flex h-1/2 w-full items-start">
+                      {w.me < 0 && <div className="w-full rounded-b bg-rose-400/70 shadow-[0_0_8px_#ff4d6d]" style={{ height: `${(-w.me / maxAbs) * 100}%` }} />}
+                    </div>
+                    <span className={`font-mono text-[10px] ${w.week >= model.playoffStart ? "text-fuchsia-300" : "text-slate-500"}`}>{w.week}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {(result.flags.length > 0 || result.myDrops.length > 0 || result.theirDrops.length > 0) && (
+              <ul className="space-y-1.5 text-sm text-slate-300">
+                {result.flags.map((f, i) => (
+                  <li key={i}>• {f}</li>
+                ))}
+                {result.myDrops.length > 0 && <li>• You would need to drop: {names(result.myDrops)}</li>}
+                {result.theirDrops.length > 0 && <li>• They would need to drop: {names(result.theirDrops)}</li>}
+              </ul>
+            )}
+
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                className="btn btn-violet"
+                onClick={() =>
+                  askAgent(
+                    `Analyze this trade like an expert: I give ${names(give)} to ${partner?.teamName} and get ${names(get)}. ` +
+                      `Use evaluate_trade, then check current injury news, roles and usage for every player involved, my roster fit, byes, and the playoff schedule. ` +
+                      `Tell me if I should accept, and if not, suggest a fair counter they would actually accept.`
+                  )
+                }
+              >
+                ✦ Ask the AI agent for a full breakdown
+              </button>
+              <span className="text-xs text-slate-500">The simulator handles the math. The agent adds news, injury history and negotiation.</span>
+            </div>
+          </div>
+        )}
+      </Panel>
+    </div>
+  );
+}
+
+function RosterPicker({
+  title,
+  players,
+  selected,
+  onToggle,
+  tone,
+}: {
+  title: string;
+  players: PlayerView[];
+  selected: string[];
+  onToggle: (id: string) => void;
+  tone: "rose" | "lime";
+}) {
+  const sel = tone === "rose" ? "border-rose-400/60 bg-rose-500/10" : "border-lime-400/60 bg-lime-500/10";
+  return (
+    <Panel title={title}>
+      <div className="max-h-[420px] space-y-1 overflow-y-auto pr-1">
+        {players.map((v) => {
+          const on = selected.includes(v.p.id);
+          return (
+            <button
+              key={v.p.id}
+              onClick={() => onToggle(v.p.id)}
+              className={`flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition ${on ? sel : "border-transparent hover:bg-white/5"}`}
+            >
+              <PosTag pos={v.p.pos} />
+              <span className="font-medium text-slate-100">{v.p.name}</span>
+              <span className="text-xs text-slate-500">{v.p.team}</span>
+              <InjuryTag status={v.p.injury} />
+              <span className="ml-auto font-mono text-xs text-slate-400">{v.rosPoints.toFixed(0)} ROS</span>
+            </button>
+          );
+        })}
+      </div>
+    </Panel>
+  );
+}
+
+function Big({ label, value, sub, tone = "cyan" }: { label: string; value: React.ReactNode; sub?: React.ReactNode; tone?: "cyan" | "lime" | "rose" }) {
+  const t = { cyan: "text-cyan-200", lime: "text-lime-300", rose: "text-rose-300" }[tone];
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/30 p-3">
+      <div className="hud-title">{label}</div>
+      <div className={`mt-1 font-display text-lg font-bold ${t}`}>{value}</div>
+      {sub && <div className="mt-1 text-xs text-slate-400">{sub}</div>}
+    </div>
+  );
+}
