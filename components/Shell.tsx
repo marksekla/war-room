@@ -63,18 +63,10 @@ export default function Shell() {
               </button>
             ))}
           </nav>
-          <div className="mt-auto space-y-2 text-xs text-slate-500">
+          <div className="mt-auto">
             <button className="btn btn-ghost w-full justify-start" onClick={() => setSettingsOpen(true)}>
               ⚙ Settings & AI key
             </button>
-            <a
-              className="block px-3 hover:text-cyan-300"
-              href={process.env.NEXT_PUBLIC_REPO_URL || "https://github.com"}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Open source · MIT
-            </a>
           </div>
         </aside>
 

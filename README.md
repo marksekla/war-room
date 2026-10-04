@@ -44,7 +44,6 @@ Every time you push changes to GitHub, Vercel redeploys automatically.
 
 `.github/workflows/update-data.yml` rebuilds `data/nfl.json` from nflverse twice a day (about 7am and 7pm Eastern) and commits it if anything changed. The site reads the newest copy straight from your repo, so snap counts, practice reports and team stats stay current on their own. Nothing to set up: GitHub runs it for free on public repos. To run it right away, open your repo's **Actions** tab, pick **Update NFL data**, and click **Run workflow**.
 
-Optional: set `NEXT_PUBLIC_REPO_URL` in Vercel to your GitHub repo URL so the "Open source" link in the sidebar points to it.
 
 ## Getting an API key
 

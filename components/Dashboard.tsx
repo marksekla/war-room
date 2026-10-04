@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { LeagueModel, PlayerView } from "@/lib/model";
 import { Delta, InjuryTag, Meter, Panel, PosTag, RankChip, Stat } from "./ui";
 import { PlayerName } from "./PlayerDrawer";
@@ -27,12 +27,31 @@ export default function Dashboard({ model, myId }: { model: LeagueModel; myId: n
   const h2h = useMemo(() => model.headToHead(myId), [model, myId]);
   const moves = useMemo(() => model.recentMoves(10), [model]);
 
-  const byeWeeks = model.remainingWeeks();
-  const startersByPosPerWeek = byeWeeks.map((w) => {
-    const lu = model.lineup(me.players, (id) => model.expected(id, w));
-    return { week: w, total: lu.total, empty: lu.filled.filter((f) => !f.id || f.val < 1).length };
-  });
-  const maxWeek = Math.max(...startersByPosPerWeek.map((x) => x.total), 1);
+  // Weekly outlook: best lineup each week, and which of your usual starters are missing.
+  const outlook = useMemo(() => {
+    // Your normal lineup. Slots without data (e.g. a kicker with no projection) are ignored.
+    const coreFilled = model.lineup(me.players, (id) => model.view(id)?.valuePg ?? 0).filled;
+    const core = coreFilled.filter((f) => f.id && f.val >= 1);
+    return model.remainingWeeks().map((w) => {
+      const lu = model.lineup(me.players, (id) => model.expected(id, w));
+      const weak = lu.filled.filter((f, i) => (coreFilled[i]?.val ?? 0) >= 1 && (!f.id || f.val < 1)).map((f) => f.slot.replace("_", " "));
+      const missing = core
+        .filter((f) => model.expected(f.id!, w) === 0)
+        .map((f) => {
+          const v = model.view(f.id!)!;
+          const why = !model.gameFor(v.p.team, w) ? "bye" : v.p.injury ?? "out";
+          return `${v.p.name} (${why})`;
+        });
+      return { week: w, total: lu.total, weak, missing };
+    });
+  }, [model, me]);
+  const firstProblem = outlook.find((x) => x.weak.length || x.missing.length)?.week ?? model.week;
+  const [pick, setPick] = useState<number>(firstProblem);
+  const picked = outlook.find((x) => x.week === pick) ?? outlook[0];
+  const totals = outlook.map((x) => x.total);
+  const hi = Math.max(1, ...totals);
+  const lo = Math.min(...totals);
+  const floor = Math.max(0, lo - (hi - lo) * 1.2 - 10); // start bars above zero so differences are visible
 
   return (
     <div className="space-y-6">
@@ -52,6 +71,57 @@ export default function Dashboard({ model, myId }: { model: LeagueModel; myId: n
           tone="amber"
         />
       </div>
+
+      <Panel
+        title="Weekly outlook to the title"
+        right={<span className="hidden text-[11px] text-slate-500 sm:inline">Tap a week</span>}
+      >
+        <div className="flex h-28 items-end gap-1 sm:gap-1.5">
+          {outlook.map((x) => {
+            const playoff = x.week >= model.playoffStart;
+            const problem = x.weak.length > 0 || x.missing.length > 0;
+            const on = x.week === picked?.week;
+            return (
+              <button
+                key={x.week}
+                type="button"
+                onClick={() => setPick(x.week)}
+                className="group flex h-full flex-1 flex-col items-center gap-1"
+                aria-label={`Week ${x.week}: ${x.total.toFixed(1)} points`}
+              >
+                <span className="hidden font-mono text-[10px] text-slate-400 sm:block">{x.total.toFixed(0)}</span>
+                <div className="flex w-full flex-1 items-end">
+                  <div
+                    className={`w-full rounded-t transition ${
+                      playoff ? "bg-fuchsia-400/70 shadow-[0_0_10px_#e879f9]" : "bg-cyan-400/60 shadow-[0_0_10px_#22e4ff]"
+                    } ${on ? "ring-2 ring-white/70" : "group-hover:brightness-125"}`}
+                    style={{ height: `${Math.max(8, ((x.total - floor) / (hi - floor)) * 100)}%` }}
+                  />
+                </div>
+                <span className={`font-mono text-[10px] ${problem ? "text-amber-300" : "text-slate-500"} ${on ? "font-bold" : ""}`}>{x.week}</span>
+              </button>
+            );
+          })}
+        </div>
+        {picked && (
+          <div className="mt-3 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm">
+            <span className="font-display font-bold text-slate-100">Week {picked.week}</span>
+            <span className="ml-2 font-mono text-cyan-200">{picked.total.toFixed(1)} pts</span>
+            {picked.week >= model.playoffStart && <span className="ml-2 text-xs text-fuchsia-300">playoffs</span>}
+            <div className="mt-1 text-xs text-slate-400">
+              {picked.missing.length || picked.weak.length ? (
+                <>
+                  {picked.missing.length > 0 && <span className="text-amber-200">Missing: {picked.missing.join(", ")}. </span>}
+                  {picked.weak.length > 0 && <span className="text-rose-300">Weak or empty slot: {picked.weak.join(", ")}.</span>}
+                </>
+              ) : (
+                "Full lineup, no byes or injuries among your starters."
+              )}
+            </div>
+          </div>
+        )}
+        <p className="mt-2 text-xs text-slate-500">Amber weeks have starters on bye or hurt. Pink bars are playoff weeks.</p>
+      </Panel>
 
       <Panel title="Roster intel" corners>
         <div className="-mx-4 overflow-x-auto">
@@ -115,51 +185,47 @@ export default function Dashboard({ model, myId }: { model: LeagueModel; myId: n
         </p>
       </Panel>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Panel title="Weekly outlook to the title">
-          <div className="flex h-44 items-end gap-1.5">
-            {startersByPosPerWeek.map((x) => (
-              <div key={x.week} className="flex h-full flex-1 flex-col items-center gap-1">
-                <div className="flex w-full flex-1 items-end">
-                  <div
-                    className={`w-full rounded-t ${x.week >= model.playoffStart ? "bg-fuchsia-400/70 shadow-[0_0_10px_#e879f9]" : "bg-cyan-400/60 shadow-[0_0_10px_#22e4ff]"}`}
-                    style={{ height: `${(x.total / maxWeek) * 100}%` }}
-                    title={`${x.total.toFixed(1)} pts${x.empty ? `, ${x.empty} weak slot(s)` : ""}`}
-                  />
-                </div>
-                <span className={`font-mono text-[10px] ${x.empty ? "text-amber-300" : "text-slate-500"}`}>{x.week}</span>
-              </div>
+      <div className="grid items-start gap-6 lg:grid-cols-2">
+        <Panel title="Standings">
+          <ul className="-my-1 divide-y divide-white/5">
+            {standings.map((t, i) => (
+              <li
+                key={t.rosterId}
+                className={`flex items-center gap-3 rounded px-1 py-1.5 text-sm ${t.rosterId === myId ? "bg-cyan-400/10" : ""}`}
+              >
+                <span className="w-5 text-right font-mono text-xs text-slate-500">{i + 1}</span>
+                <span className="min-w-0 flex-1 truncate">
+                  <span className="font-medium text-slate-100">{t.teamName}</span>
+                  <span className="ml-2 hidden text-xs text-slate-500 sm:inline">{t.ownerName}</span>
+                </span>
+                <span className="w-10 text-right font-mono text-slate-200">
+                  {t.wins}-{t.losses}
+                </span>
+                <span className="w-14 text-right font-mono text-slate-400">{t.pf.toFixed(1)}</span>
+              </li>
             ))}
-          </div>
-          <p className="mt-3 text-xs text-slate-500">
-            Projected best-lineup points by week. Amber week numbers have an empty or near-empty starting slot (byes, injuries). Pink bars are playoff weeks.
-          </p>
+          </ul>
         </Panel>
 
-        <Panel title="Standings">
-          <table className="tbl">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Team</th>
-                <th>W-L</th>
-                <th>PF</th>
-              </tr>
-            </thead>
-            <tbody>
-              {standings.map((t, i) => (
-                <tr key={t.rosterId} className={t.rosterId === myId ? "bg-cyan-400/10" : ""}>
-                  <td className="font-mono text-slate-500">{i + 1}</td>
-                  <td>
-                    <div className="font-medium text-slate-100">{t.teamName}</div>
-                    <div className="text-xs text-slate-500">{t.ownerName}</div>
-                  </td>
-                  <td className="font-mono">{t.wins}-{t.losses}</td>
-                  <td className="font-mono">{t.pf.toFixed(1)}</td>
-                </tr>
+        <Panel title="League wire">
+          {moves.length ? (
+            <ul className="-my-1 divide-y divide-white/5">
+              {moves.map((mv, i) => (
+                <li key={i} className="flex items-start gap-3 py-1.5 text-sm">
+                  <span
+                    className={`mt-0.5 w-5 shrink-0 text-center ${mv.type === "trade" ? "text-fuchsia-300" : mv.type === "waiver" ? "text-cyan-300" : "text-slate-400"}`}
+                    title={mv.type}
+                  >
+                    {mv.type === "trade" ? "⇄" : mv.type === "waiver" ? "⊕" : "+"}
+                  </span>
+                  <span className={`min-w-0 flex-1 ${mv.teams.includes(myId) ? "text-cyan-100" : "text-slate-300"}`}>{mv.text}</span>
+                  <span className="shrink-0 font-mono text-[11px] text-slate-500">W{mv.week}</span>
+                </li>
               ))}
-            </tbody>
-          </table>
+            </ul>
+          ) : (
+            <p className="py-6 text-center text-sm text-slate-500">No adds, drops or trades yet.</p>
+          )}
         </Panel>
       </div>
 
@@ -198,24 +264,6 @@ export default function Dashboard({ model, myId }: { model: LeagueModel; myId: n
         </p>
       </Panel>
 
-      {moves.length > 0 && (
-        <Panel title="League wire">
-          <ul className="divide-y divide-white/5">
-            {moves.map((mv, i) => (
-              <li key={i} className="flex items-start gap-3 py-2 text-sm">
-                <span
-                  className={`mt-0.5 w-5 shrink-0 text-center ${mv.type === "trade" ? "text-fuchsia-300" : mv.type === "waiver" ? "text-cyan-300" : "text-slate-400"}`}
-                  title={mv.type}
-                >
-                  {mv.type === "trade" ? "⇄" : mv.type === "waiver" ? "⊕" : "+"}
-                </span>
-                <span className={`min-w-0 flex-1 ${mv.teams.includes(myId) ? "text-cyan-100" : "text-slate-300"}`}>{mv.text}</span>
-                <span className="shrink-0 font-mono text-[11px] text-slate-500">W{mv.week}</span>
-              </li>
-            ))}
-          </ul>
-        </Panel>
-      )}
     </div>
   );
 }

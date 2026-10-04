@@ -12,16 +12,19 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
   const [partnerId, setPartnerId] = useState<number>(others[0]?.rosterId ?? 0);
   const [give, setGive] = useState<string[]>([]);
   const [get, setGet] = useState<string[]>([]);
+  const [metric, setMetric] = useState<"ros" | "week">("ros");
 
   const me = model.team(myId)!;
   const partner = model.team(partnerId);
   const profile = useMemo(() => (partner && model.activity ? model.managerProfile(partner.rosterId) : null), [model, partner]);
 
+  const score = (v: PlayerView) => (metric === "ros" ? v.rosPoints : model.expected(v.p.id, model.week));
   const sortRoster = (ids: string[]) =>
     ids
       .map((id) => model.view(id))
       .filter(Boolean)
-      .sort((a, b) => POS_ORDER[a!.p.pos] - POS_ORDER[b!.p.pos] || b!.rosPoints - a!.rosPoints) as PlayerView[];
+      .sort((a, b) => POS_ORDER[a!.p.pos] - POS_ORDER[b!.p.pos] || score(b!) - score(a!)) as PlayerView[];
+  const label = (v: PlayerView) => (metric === "ros" ? `${v.rosPoints.toFixed(0)} ROS` : `${score(v).toFixed(1)} WK${model.week}`);
 
   const result = useMemo(
     () => (give.length && get.length && partner ? model.evaluateTrade(myId, partnerId, give, get) : null),
@@ -55,13 +58,25 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
         {(give.length > 0 || get.length > 0) && (
           <button className="btn btn-ghost" onClick={() => { setGive([]); setGet([]); }}>Clear</button>
         )}
+        <div className="ml-auto flex rounded-lg border border-white/10 p-0.5 font-mono text-xs" role="group" aria-label="Show points for">
+          {(["ros", "week"] as const).map((k) => (
+            <button
+              key={k}
+              onClick={() => setMetric(k)}
+              className={`rounded-md px-2.5 py-1 ${metric === k ? "bg-cyan-400/20 text-cyan-100" : "text-slate-400 hover:text-slate-100"}`}
+              title={k === "ros" ? "Projected points for the rest of the season" : `Projected points this week (week ${model.week})`}
+            >
+              {k === "ros" ? "ROS" : `Wk ${model.week}`}
+            </button>
+          ))}
+        </div>
       </div>
 
       {profile && <p className="-mt-3 text-xs text-slate-400">{profile.summary}</p>}
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <RosterPicker title={`You send (${me.teamName})`} players={sortRoster(me.players)} selected={give} onToggle={(id) => toggle(give, setGive, id)} tone="rose" />
-        <RosterPicker title={`You get (${partner?.teamName ?? ""})`} players={sortRoster(partner?.players ?? [])} selected={get} onToggle={(id) => toggle(get, setGet, id)} tone="lime" />
+        <RosterPicker title={`You send (${me.teamName})`} players={sortRoster(me.players)} selected={give} onToggle={(id) => toggle(give, setGive, id)} tone="rose" label={label} />
+        <RosterPicker title={`You get (${partner?.teamName ?? ""})`} players={sortRoster(partner?.players ?? [])} selected={get} onToggle={(id) => toggle(get, setGet, id)} tone="lime" label={label} />
       </div>
 
       <Panel title="Simulation" corners>
@@ -153,12 +168,14 @@ function RosterPicker({
   selected,
   onToggle,
   tone,
+  label,
 }: {
   title: string;
   players: PlayerView[];
   selected: string[];
   onToggle: (id: string) => void;
   tone: "rose" | "lime";
+  label: (v: PlayerView) => string;
 }) {
   const sel = tone === "rose" ? "border-rose-400/60 bg-rose-500/10" : "border-lime-400/60 bg-lime-500/10";
   const { open } = usePlayerDrawer();
@@ -177,7 +194,7 @@ function RosterPicker({
               <span className="font-medium text-slate-100">{v.p.name}</span>
               <span className="text-xs text-slate-500">{v.p.team}</span>
               <InjuryTag status={v.p.injury} />
-              <span className="ml-auto font-mono text-xs text-slate-400">{v.rosPoints.toFixed(0)} ROS</span>
+              <span className="ml-auto whitespace-nowrap font-mono text-xs text-slate-400">{label(v)}</span>
               <span
                 role="button"
                 tabIndex={0}
