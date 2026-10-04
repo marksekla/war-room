@@ -10,6 +10,7 @@ import StartSit from "./StartSit";
 import Trades from "./Trades";
 import Chat from "./Chat";
 import { PlayerDrawerProvider } from "./PlayerDrawer";
+import PlayerSearch from "./PlayerSearch";
 import { Spinner } from "./ui";
 
 export type Tab = "dashboard" | "waivers" | "lineup" | "trades" | "agent";
@@ -94,6 +95,7 @@ export default function Shell() {
                 {model ? `${model.bundle.league.name} · Week ${model.week}` : progress}
               </div>
             </div>
+            {model && <PlayerSearch model={model} compact />}
             <button
               className="grid h-9 w-9 place-items-center rounded-lg text-lg text-slate-300 active:bg-white/10"
               onClick={reload}
@@ -141,6 +143,7 @@ export default function Shell() {
               </>
             )}
             <div className="ml-auto flex items-center gap-2">
+              {model && <PlayerSearch model={model} />}
               {loading ? (
                 <Spinner label={progress || "Syncing"} />
               ) : (
@@ -184,7 +187,7 @@ export default function Shell() {
             )}
             {model && me && (
               <>
-                {tab === "dashboard" && <Dashboard model={model} myId={me.rosterId} />}
+                {tab === "dashboard" && <Dashboard model={model} myId={me.rosterId} go={(t) => { setTab(t); window.scrollTo({ top: 0 }); }} />}
                 {tab === "waivers" && <Waivers model={model} myId={me.rosterId} />}
                 {tab === "lineup" && <StartSit model={model} myId={me.rosterId} />}
                 {tab === "trades" && <Trades model={model} myId={me.rosterId} askAgent={askAgent} />}

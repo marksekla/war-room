@@ -218,6 +218,25 @@ export interface NflData {
   /** Defensive and O-line regulars by team, with their latest injury status. */
   starters?: Record<string, { def: NflStarter[]; ol: NflStarter[] }>;
   startersReportWeek?: number | null;
+  /** Learned from past results by scripts/calibrate.py (refits every time a week finishes). */
+  calib?: Calibration | null;
+}
+
+export interface Calibration {
+  version: number;
+  season: number;
+  throughWeek: number;
+  n: number; // player-weeks used
+  weights: Record<string, { proj: number; last3: number; ppg: number; xfp: number }>;
+  weightsNoProj?: Record<string, { last3: number; ppg: number; xfp: number }>;
+  projBlend: { sleeper: number; espn: number } | null;
+  sd: Record<string, number>; // weekly PPR prediction error (std dev) by position
+  avail: Record<string, number>; // chance a starter plays next game, by position
+  accuracy: { warRoom?: number; sleeper?: number; espn?: number; n?: number };
+  /** How strongly Vegas implied totals and defense-vs-position scale a baseline, by position. */
+  matchup?: Record<string, { vegas: number; dvp: number }>;
+  /** How much FantasyCalc market value should pull a player's value, by position (learned from snapshots). */
+  market?: Record<string, number> | null;
 }
 
 export interface MarketValue {
@@ -284,4 +303,6 @@ export interface LeagueActivity {
   transactions: Transaction[];
   /** Completed trades from last season in this league (same managers, matched by owner id). */
   lastSeasonTrades: (Transaction & { ownerIds: string[] })[];
+  /** Remaining regular-season head-to-head pairings by week (roster ids). */
+  schedule?: Record<string, [number, number][]>;
 }

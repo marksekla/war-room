@@ -3,7 +3,7 @@
 
 import type { LeagueModel } from "../model";
 import type { AiSettings, ProviderId } from "../types";
-import { TOOLS } from "./tools";
+import { TOOLS, type AgentCtx } from "./tools";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -481,14 +481,18 @@ export async function runAgent(
   m: LeagueModel,
   myId: number,
   history: ChatMessage[],
-  onStep: (label: string) => void
+  onStep: (label: string) => void,
+  ctx: AgentCtx = { untouchables: [] }
 ): Promise<ChatMessage> {
   if (!s.apiKey) throw new Error("Add your API key in Settings first.");
-  const system = buildSystem(m, myId, s.strategy);
+  const locked = ctx.untouchables.map((id) => m.view(id)?.p.name).filter(Boolean);
+  const system =
+    buildSystem(m, myId, s.strategy) +
+    (locked.length ? `\n\nPlayers the user has locked and will not trade: ${locked.join(", ")}. Never include them in trade ideas.` : "");
   const exec: Exec = async (name, args) => {
     const t = TOOLS.find((x) => x.name === name);
     if (!t) return { error: `Unknown tool ${name}` };
-    return await t.run(m, myId, args);
+    return await t.run(m, myId, args, ctx);
   };
   const trimmed = history.slice(-16).map((h) => ({ role: h.role, content: h.content }));
   switch (s.provider) {

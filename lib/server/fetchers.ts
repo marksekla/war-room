@@ -269,8 +269,10 @@ export function getNflData(): Promise<NflData | null> {
     if (slug) {
       remote = await getJson<NflData>(`https://raw.githubusercontent.com/${slug}/${branch}/data/nfl.json`).catch(() => null);
     }
-    if (remote?.players && (!local || remote.updated > local.updated)) return remote;
-    return local;
+    const best = remote?.players && (!local || remote.updated > local.updated) ? remote : local;
+    // The saved market history is only for the nightly calibration; don't ship it to browsers.
+    if (best) delete (best as NflData & { marketHistory?: unknown }).marketHistory;
+    return best;
   });
 }
 
@@ -594,6 +596,27 @@ export async function getLeagueActivity(leagueId: string, week: number): Promise
       /* history is optional */
     }
   }
+  // Remaining regular-season schedule (Sleeper pre-generates every week's pairings).
+  const playoffStart = Number(league?.settings?.playoff_week_start) || 15;
+  const future = Array.from({ length: Math.max(0, playoffStart - week) }, (_, i) => week + i);
+  const schedule: Record<string, [number, number][]> = {};
+  const pairs = (rows: { roster_id: number; matchup_id: number | null }[] | null) => {
+    const by = new Map<number, number[]>();
+    for (const r of rows ?? []) if (r.matchup_id != null) by.set(r.matchup_id, [...(by.get(r.matchup_id) ?? []), r.roster_id]);
+    return [...by.values()].filter((x) => x.length === 2).map((x) => [x[0], x[1]] as [number, number]);
+  };
+  const futureRows = await Promise.all(
+    future.map((w) =>
+      w === week
+        ? Promise.resolve(matchupsRaw)
+        : sleeper<{ roster_id: number; matchup_id: number | null }[]>(`/league/${leagueId}/matchups/${w}`, 6 * HOUR).catch(() => null)
+    )
+  );
+  future.forEach((w, i) => {
+    const p = pairs(futureRows[i] as { roster_id: number; matchup_id: number | null }[] | null);
+    if (p.length) schedule[String(w)] = p;
+  });
+
   const matchups: MatchupRow[] = (matchupsRaw ?? []).map((m) => ({
     rosterId: m.roster_id,
     matchupId: m.matchup_id ?? null,
@@ -605,5 +628,6 @@ export async function getLeagueActivity(leagueId: string, week: number): Promise
     matchups,
     transactions: txByWeek.flat().sort((a, b) => b.created - a.created),
     lastSeasonTrades,
+    schedule,
   };
 }

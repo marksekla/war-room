@@ -27,7 +27,29 @@ export default function Chat({
   openSettings: () => void;
 }) {
   const { saved } = useLeague();
+  const storeKey = `war-room:chat:${saved.leagueId}:${myId}`;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  // Keep the conversation across refreshes (this browser only, per league and team).
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(storeKey);
+      setMessages(raw ? (JSON.parse(raw) as ChatMessage[]) : []);
+    } catch {
+      setMessages([]);
+    }
+    setLoaded(true);
+  }, [storeKey]);
+  useEffect(() => {
+    if (!loaded) return;
+    try {
+      if (messages.length) localStorage.setItem(storeKey, JSON.stringify(messages.slice(-40)));
+      else localStorage.removeItem(storeKey);
+    } catch {
+      /* storage full or blocked: chat still works, it just won't be saved */
+    }
+  }, [messages, loaded, storeKey]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [live, setLive] = useState<string[]>([]);
@@ -52,7 +74,9 @@ export default function Chat({
     setBusy(true);
     setLive([]);
     try {
-      const reply = await runAgent(saved.ai, model, myId, history, (label) => setLive((l) => [...l, label]));
+      const reply = await runAgent(saved.ai, model, myId, history, (label) => setLive((l) => [...l, label]), {
+        untouchables: saved.untouchables ?? [],
+      });
       setMessages((m) => [...m, reply]);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -63,12 +87,12 @@ export default function Chat({
   };
 
   useEffect(() => {
-    if (pendingPrompt) {
+    if (pendingPrompt && loaded) {
       clearPending();
       send(pendingPrompt);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingPrompt]);
+  }, [pendingPrompt, loaded]);
 
   const provider = PROVIDERS[saved.ai.provider];
 

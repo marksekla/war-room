@@ -7,9 +7,31 @@ import { Delta, Empty, InjuryTag, Meter, Panel, PosTag, RankChip } from "./ui";
 import { PlayerName } from "./PlayerDrawer";
 
 const FILTERS: (Position | "ALL")[] = ["ALL", "RB", "WR", "TE", "QB", "K", "DEF"];
+const STREAM_POS: Position[] = ["QB", "TE", "K", "DEF"];
 
 export default function Waivers({ model, myId }: { model: LeagueModel; myId: number }) {
+  const [mode, setMode] = useState<"ros" | "stream">("ros");
+  return (
+    <div className="space-y-6">
+      <div className="flex rounded-lg border border-white/10 p-0.5 font-mono text-xs sm:w-fit">
+        {(["ros", "stream"] as const).map((k) => (
+          <button
+            key={k}
+            onClick={() => setMode(k)}
+            className={`flex-1 rounded-md px-3 py-1.5 sm:flex-none ${mode === k ? "bg-cyan-400/20 text-cyan-100" : "text-slate-400 hover:text-slate-100"}`}
+          >
+            {k === "ros" ? "Rest of season" : "Streamers (one week)"}
+          </button>
+        ))}
+      </div>
+      {mode === "ros" ? <RosWaivers model={model} myId={myId} /> : <Streamers model={model} myId={myId} />}
+    </div>
+  );
+}
+
+function RosWaivers({ model, myId }: { model: LeagueModel; myId: number }) {
   const [pos, setPos] = useState<Position | "ALL">("ALL");
+  const faab = useMemo(() => model.faab(myId), [model, myId]);
   const drops = useMemo(() => model.dropCandidates(myId), [model, myId]);
   const [dropId, setDropId] = useState<string>(drops[0]?.p.id ?? "");
 
@@ -21,7 +43,7 @@ export default function Waivers({ model, myId }: { model: LeagueModel; myId: num
   }, [model, myId, pos, dropId]);
 
   return (
-    <div className="space-y-6">
+    <>
       <Panel
         title="Waiver radar"
         corners
@@ -50,6 +72,18 @@ export default function Waivers({ model, myId }: { model: LeagueModel; myId: num
           </select>
           <span className="text-xs text-slate-500">Lineup gain = how many points your best weekly lineup adds through the championship.</span>
         </div>
+        {faab && (
+          <p className="-mt-2 mb-4 text-xs text-slate-400">
+            FAAB left: <span className="font-mono text-slate-200">${faab.remaining}</span> of ${faab.budget}
+            {faab.median != null && (
+              <>
+                {" "}
+                · League&apos;s median winning bid <span className="font-mono text-slate-200">${faab.median}</span>, top{" "}
+                <span className="font-mono text-slate-200">${faab.top}</span> ({faab.claims} claims)
+              </>
+            )}
+          </p>
+        )}
         {!rows.length ? (
           <Empty>No free agents found at this position.</Empty>
         ) : (
@@ -59,6 +93,7 @@ export default function Waivers({ model, myId }: { model: LeagueModel; myId: num
                 <tr>
                   <th>Player</th>
                   <th>Lineup gain</th>
+                  {faab && <th title="Suggested FAAB bid">Bid</th>}
                   <th>ROS pts</th>
                   <th className="mhide">Last 3</th>
                   <th>Proj</th>
@@ -84,6 +119,7 @@ export default function Waivers({ model, myId }: { model: LeagueModel; myId: num
                         </div>
                       </td>
                       <td><Delta value={gain} /></td>
+                      {faab && <td className="font-mono text-amber-200">{faab.suggest(gain) ? `$${faab.suggest(gain)}` : "-"}</td>}
                       <td className="font-mono">{v.rosPoints.toFixed(0)}</td>
                       <td className="mhide font-mono">{v.last3.toFixed(1)}</td>
                       <td className="font-mono text-cyan-200">{v.projNext?.toFixed(1) ?? "-"}</td>
@@ -109,8 +145,133 @@ export default function Waivers({ model, myId }: { model: LeagueModel; myId: num
         )}
       </Panel>
       <p className="text-xs text-slate-500">
-        Tap a name for snap trends, red zone work, expected points and news. Numbers lag breaking news, so ask the AI agent before you claim anyone.
+        Tap a name for snap trends, red zone work, expected points and news. Injured players only show up if they&apos;re due back before your playoffs.
+        {faab ? " Bids scale with lineup gain and how big your league bids." : ""} Numbers lag breaking news, so ask the AI agent before you claim
+        anyone.
       </p>
-    </div>
+    </>
+  );
+}
+
+function Streamers({ model, myId }: { model: LeagueModel; myId: number }) {
+  const weeks = model.remainingWeeks().slice(0, 3);
+  const [week, setWeek] = useState(weeks[0]);
+  const [pos, setPos] = useState<Position>("QB");
+  const me = model.team(myId)!;
+  // Who you'd be replacing: your best healthy option at that spot this week.
+  const mine = me.players
+    .map((id) => model.view(id))
+    .filter((v) => v && v.p.pos === pos)
+    .map((v) => ({ v: v!, exp: model.expected(v!.p.id, week) }))
+    .sort((a, b) => b.exp - a.exp)[0];
+  const rows = useMemo(
+    () =>
+      model
+        .freeAgents(pos)
+        .map((v) => ({ v, exp: model.expected(v.p.id, week) }))
+        .filter((x) => x.exp > 0)
+        .sort((a, b) => b.exp - a.exp)
+        .slice(0, 15),
+    [model, pos, week]
+  );
+  return (
+    <Panel
+      title="Streamers"
+      corners
+      right={
+        <div className="flex flex-wrap gap-1">
+          {STREAM_POS.map((f) => (
+            <button
+              key={f}
+              onClick={() => setPos(f)}
+              className={`rounded px-2.5 py-1 font-mono text-xs ${pos === f ? "bg-cyan-400/20 text-cyan-100 shadow-glow" : "text-slate-400 hover:text-slate-100"}`}
+            >
+              {f}
+            </button>
+          ))}
+        </div>
+      }
+    >
+      <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
+        <span className="hud-title">Week</span>
+        {weeks.map((w) => (
+          <button
+            key={w}
+            onClick={() => setWeek(w)}
+            className={`rounded px-3 py-1 font-mono ${week === w ? "bg-cyan-400/20 text-cyan-100 shadow-glow" : "text-slate-400 hover:text-slate-100"}`}
+          >
+            {w}
+          </button>
+        ))}
+        <span className="ml-auto text-xs text-slate-500">
+          Your best {pos} this week:{" "}
+          {mine ? (
+            <span className="text-slate-200">
+              {mine.v.p.name}{" "}
+              {mine.exp > 0 ? `(${mine.exp.toFixed(1)})` : model.gameFor(mine.v.p.team, week) ? "(no projection)" : "(on bye or out)"}
+            </span>
+          ) : (
+            "none"
+          )}
+        </span>
+      </div>
+      {!rows.length ? (
+        <Empty>No free agents with a game this week at {pos}.</Empty>
+      ) : (
+        <div className="-mx-4 overflow-x-auto">
+          <table className="tbl tbl-sticky">
+            <thead>
+              <tr>
+                <th>Player</th>
+                <th>Proj wk {week}</th>
+                <th>vs yours</th>
+                <th>Matchup</th>
+                <th>Team total</th>
+                <th className="mhide">ROS pts</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(({ v, exp }) => {
+                const g = model.gameFor(v.p.team, week);
+                const d = g ? model.dvp.get(g.opp)?.get(v.p.pos) : undefined;
+                const opp = g && pos === "DEF" && g.game.total != null && g.impliedTotal != null ? g.game.total - g.impliedTotal : null;
+                return (
+                  <tr key={v.p.id}>
+                    <td>
+                      <div className="flex items-center gap-2">
+                        <PosTag pos={v.p.pos} />
+                        <PlayerName v={v} className="max-w-[130px] sm:max-w-none" />
+                        <InjuryTag status={v.p.injury} />
+                      </div>
+                    </td>
+                    <td className="font-mono font-semibold neon-text">{exp.toFixed(1)}</td>
+                    <td>
+                      <Delta value={exp - (mine?.exp ?? 0)} />
+                    </td>
+                    <td>
+                      {g ? (
+                        <span className="flex items-center gap-1.5 font-mono text-xs">
+                          {g.home ? "vs" : "@"} {g.opp} {pos !== "DEF" && <RankChip rank={d?.rank} />}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-amber-300">BYE</span>
+                      )}
+                    </td>
+                    <td className="font-mono text-xs">
+                      {pos === "DEF" ? (opp != null ? `opp ${opp.toFixed(1)}` : "-") : g?.impliedTotal != null ? g.impliedTotal.toFixed(1) : "-"}
+                    </td>
+                    <td className="mhide font-mono">{v.rosPoints.toFixed(0)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="mt-3 text-xs text-slate-500">
+        One-week pickups for byes and injuries, ranked by this week&apos;s projection with matchup and Vegas built in. For defenses, a low opponent
+        team total is what you want. Vegas lines usually post a week ahead, so later weeks lean on matchups only.
+      </p>
+    </Panel>
   );
 }

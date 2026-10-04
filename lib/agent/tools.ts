@@ -5,12 +5,16 @@ import { fmtKick, type LeagueModel, type PlayerView } from "../model";
 import { fetchNews, fetchWeather, weatherNote } from "../live";
 import type { NflUsage, Position } from "../types";
 
+export interface AgentCtx {
+  untouchables: string[];
+}
+
 export interface ToolDef {
   name: string;
   description: string;
   parameters: { type: "object"; properties: Record<string, unknown>; required?: string[] };
   label: (args: Record<string, unknown>) => string;
-  run: (m: LeagueModel, myId: number, args: Record<string, unknown>) => unknown | Promise<unknown>;
+  run: (m: LeagueModel, myId: number, args: Record<string, unknown>, ctx?: AgentCtx) => unknown | Promise<unknown>;
 }
 
 const pct = (x: number | null) => (x == null ? null : Math.round(x * 100));
@@ -37,6 +41,10 @@ export function playerSummary(m: LeagueModel, v: PlayerView, detail = false) {
     trendingAdds48h: v.trendingAdds || undefined,
     marketValue: v.market ? { value: v.market.value, overallRank: v.market.rank, posRank: v.market.posRank, trend30d: v.market.trend } : undefined,
     practice: practiceLine(m, v),
+    expectedReturnWeek: m.returnWeek.get(v.p.id) ?? undefined,
+    roleRisk: m.roleShift.get(v.p.id)
+      ? `Role likely shrinks from week ${m.roleShift.get(v.p.id)!.fromWeek} when ${m.roleShift.get(v.p.id)!.by} returns (projections already lowered ${Math.round((1 - m.roleShift.get(v.p.id)!.mult) * 100)}% from then).`
+      : undefined,
     xfpPerGame: v.adv?.s?.xfp ?? undefined,
   };
   if (!detail) return base;
@@ -226,6 +234,18 @@ export const TOOLS: ToolDef[] = [
         )
       ),
       replacementValuePerGame: Object.fromEntries(m.replacement),
+      modelCalibration: m.nfl?.calib
+        ? {
+            learnedFromPlayerGames: m.nfl.calib.n,
+            throughWeek: m.nfl.calib.throughWeek,
+            projectionBlend: m.nfl.calib.projBlend,
+            matchupStrengthByPos: m.nfl.calib.matchup,
+            marketValueWeightByPos: m.nfl.calib.market ?? "still collecting weekly snapshots",
+            weeklyErrorStdDevByPos: m.nfl.calib.sd,
+            outOfSampleAvgMissPts: m.nfl.calib.accuracy,
+            note: "Weights are refit from real results every week. Use the error sizes to judge how close a start/sit call really is.",
+          }
+        : null,
       standings: m.teams
         .slice()
         .sort((a, b) => b.wins - a.wins || b.pf - a.pf)
@@ -325,7 +345,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "evaluate_trade",
     description:
-      "Simulates a trade week by week through the fantasy championship. Returns the points each side's best lineup gains or loses (including byes, injuries and forced drops), near-term and playoff impact, the best player in the deal, and acceptance odds.",
+      "Simulates a trade week by week through the fantasy championship. Counts byes, known injuries, the chance of future injuries (so bench depth has value), forced drops and open roster spots, and weighs playoff weeks 1.5x. Returns the verdict with plain-English reasons, warnings (selling low, recurring injuries, regression, overpaying by market value), near-term and playoff impact, and acceptance odds. It cannot see news or role changes: always check those for every player before giving a final answer.",
     parameters: {
       type: "object",
       properties: {
@@ -342,9 +362,19 @@ export const TOOLS: ToolDef[] = [
       const partner = get.ids.map((id) => m.ownerOf.get(id)).find((r) => r != null && r !== myId);
       if (partner == null) return { error: "The players you receive must be on another team's roster." };
       const r = m.evaluateTrade(myId, partner, give.ids, get.ids);
+      const odds = m.tradePlayoffImpact(myId, partner, give.ids, get.ids);
       return {
+        playoffOdds: odds
+          ? {
+              makePlayoffsPct: `${odds.before.playoffPct} -> ${odds.after.playoffPct}`,
+              winTitlePct: `${odds.before.titlePct} -> ${odds.after.titlePct}`,
+              projectedWins: `${odds.before.projWins} -> ${odds.after.projWins}`,
+            }
+          : null,
         partner: m.team(partner)?.teamName,
         verdict: r.verdict,
+        why: r.reasons,
+        yourAvgGainPerWeek: r.perWeekAvg,
         yourLineupGainRestOfSeason: r.myDelta,
         yourGainNext3Weeks: r.myNearDelta,
         yourGainPlayoffWeeks: r.myPlayoffDelta,
@@ -352,6 +382,7 @@ export const TOOLS: ToolDef[] = [
         acceptanceOdds: r.acceptance,
         bestPlayerInDeal: r.best,
         yourForcedDrops: r.myDrops.map((id) => m.view(id)?.p.name),
+        yourOpenSpotFilledWith: r.myAdds.map((id) => m.view(id)?.p.name),
         theirForcedDrops: r.theirDrops.map((id) => m.view(id)?.p.name),
         flags: r.flags,
         marketValue: r.market
@@ -530,6 +561,98 @@ export const TOOLS: ToolDef[] = [
         yourLineup: lineup(myId),
         theirLineup: lineup(h.opponent.rosterId),
       };
+    },
+  },
+  {
+    name: "find_trades",
+    description:
+      "Trade finder: scans every team for deals that upgrade the user's lineup at a position (or any), look fair by market value, and don't hurt the other lineup much. Each idea is fully simulated. Never offers players the user locked. Check news on the players before recommending one.",
+    parameters: { type: "object", properties: { position: { type: "string", enum: ["ANY", "QB", "RB", "WR", "TE"] } } },
+    label: (a) => `Scanning the league for ${a.position && a.position !== "ANY" ? a.position : ""} trades`.replace("  ", " "),
+    run: (m, myId, a, ctx) => {
+      const need = (String(a.position ?? "ANY").toUpperCase() as Position | "ANY") || "ANY";
+      const ideas = m.teams
+        .filter((t) => t.rosterId !== myId)
+        .flatMap((t) => m.findTradesWith(myId, t.rosterId, need, ctx?.untouchables ?? []))
+        .sort((x, y) => y.score - x.score)
+        .slice(0, 8);
+      return {
+        lockedPlayers: (ctx?.untouchables ?? []).map((id) => m.view(id)?.p.name).filter(Boolean),
+        ideas: ideas.map((i) => ({
+          partner: m.team(i.partnerId)?.teamName,
+          youGive: i.give.map((id) => m.view(id)?.p.name),
+          youGet: i.get.map((id) => m.view(id)?.p.name),
+          verdict: i.result.verdict,
+          yourAvgGainPerWeek: i.result.perWeekAvg,
+          yourPlayoffGain: i.result.myPlayoffDelta,
+          theirLineupGain: i.result.theirDelta,
+          acceptance: i.result.acceptance,
+          marketValue: i.result.market,
+          why: i.result.reasons,
+          watchOut: i.result.flags,
+        })),
+      };
+    },
+  },
+  {
+    name: "compare_players",
+    description:
+      "Start/sit comparison for 2-3 players: projection with a floor-to-ceiling range (10th-90th percentile), matchup rank, Vegas team total, opposing defenders and own linemen out, injury and practice status, kickoff, and a recommended start with a tiebreak based on whether the user is favored this week. Pair it with news before the final call.",
+    parameters: {
+      type: "object",
+      properties: { names: { type: "array", items: { type: "string" } }, week: { type: "number" } },
+      required: ["names"],
+    },
+    label: (a) => `Comparing ${Array.isArray(a.names) ? a.names.join(" vs ") : "players"}`,
+    run: (m, myId, a) => {
+      const res = resolvePlayers(m, a.names);
+      if (res.missing.length) return { error: `Could not find: ${res.missing.join(", ")}` };
+      const w = Number(a.week) || m.week;
+      const r = m.compare(myId, res.ids, w);
+      return {
+        week: w,
+        recommendedStart: r.pick ? m.view(r.pick)?.p.name : null,
+        why: r.why,
+        players: r.rows.map((x) => ({
+          name: x.v.p.name,
+          projection: x.range.exp,
+          floor: x.range.floor,
+          ceiling: x.range.ceiling,
+          game: x.g ? `${x.g.home ? "vs" : "@"} ${x.g.opp}, ${fmtKick(x.g.game.kickoff)}` : "BYE",
+          oppRankVsPos: x.dvpRank,
+          impliedTeamTotal: x.g?.impliedTotal ?? null,
+          opposingDefendersOut: x.defOut,
+          ownLinemenOut: x.olOut,
+          injury: x.v.p.injury,
+          practice: practiceLine(m, x.v) ?? null,
+        })),
+        note: "oppRankVsPos: 32 = most generous defense. Ranges come from the model's learned weekly error.",
+      };
+    },
+  },
+  {
+    name: "get_weekly_todo",
+    description:
+      "The user's to-do list for this week: lineup fixes versus their saved Sleeper lineup, lineup-lock alerts, the best waiver move, upcoming bye holes, roles about to shrink, sell-high and buy-low names, and injured players coming back. Good starting point for 'what should I do this week?'.",
+    parameters: { type: "object", properties: {} },
+    label: () => "Building this week's to-do list",
+    run: (m, myId) => m.actionItems(myId).map((i) => ({ type: i.kind, item: i.text })),
+  },
+  {
+    name: "get_playoff_odds",
+    description:
+      "Simulates the rest of the season thousands of times on the league's real schedule with every team's projected lineup, then the playoff bracket. Returns each team's projected wins and chances to make the playoffs, earn a bye, get the 1 seed and win the title. Use it to decide whether to push for now or for the playoff weeks.",
+    parameters: { type: "object", properties: {} },
+    label: () => "Simulating the season",
+    run: (m) => {
+      if (!m.activity?.schedule || !Object.keys(m.activity.schedule).length) return { error: "League schedule not available." };
+      return m
+        .playoffOdds()
+        .map((o) => {
+          const t = m.team(o.rosterId)!;
+          return { team: t.teamName, record: `${t.wins}-${t.losses}`, pointsFor: t.pf, ...o, rosterId: undefined };
+        })
+        .sort((a, b) => b.playoffPct - a.playoffPct);
     },
   },
   {

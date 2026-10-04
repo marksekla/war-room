@@ -1,7 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { LeagueModel, PlayerView } from "@/lib/model";
+import type { Position } from "@/lib/types";
+import { useLeague } from "@/lib/LeagueContext";
 import { Delta, Empty, InjuryTag, Panel, PosTag } from "./ui";
 import { usePlayerDrawer } from "./PlayerDrawer";
 
@@ -31,14 +33,33 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
     [model, myId, partnerId, give, get, partner]
   );
 
+  const impact = useMemo(
+    () => (give.length && get.length && partner ? model.tradePlayoffImpact(myId, partnerId, give, get) : null),
+    [model, myId, partnerId, give, get, partner]
+  );
+
   const toggle = (list: string[], set: (x: string[]) => void, id: string) =>
     set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
 
   const names = (ids: string[]) => ids.map((id) => model.view(id)?.p.name).join(" + ");
   const maxAbs = result ? Math.max(1, ...result.perWeek.map((w) => Math.abs(w.me))) : 1;
+  const { saved, setSaved } = useLeague();
+  const locked = saved.untouchables ?? [];
+  const toggleLock = (id: string) =>
+    setSaved({ untouchables: locked.includes(id) ? locked.filter((x) => x !== id) : [...locked, id] });
+  const simRef = useRef<HTMLDivElement>(null);
+
+  const loadIdea = (pid: number, g: string[], gt: string[]) => {
+    setPartnerId(pid);
+    setGive(g);
+    setGet(gt);
+    setTimeout(() => simRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
 
   return (
     <div className="space-y-6">
+      <TradeFinder model={model} myId={myId} locked={locked} onLoad={loadIdea} askAgent={askAgent} />
+
       <div className="flex flex-wrap items-center gap-3">
         <span className="hud-title">Trade partner</span>
         <select
@@ -75,18 +96,44 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
       {profile && <p className="-mt-3 text-xs text-slate-400">{profile.summary}</p>}
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <RosterPicker title={`You send (${me.teamName})`} players={sortRoster(me.players)} selected={give} onToggle={(id) => toggle(give, setGive, id)} tone="rose" label={label} />
+        <RosterPicker
+          title={`You send (${me.teamName})`}
+          players={sortRoster(me.players)}
+          selected={give}
+          onToggle={(id) => toggle(give, setGive, id)}
+          tone="rose"
+          label={label}
+          locked={locked}
+          onLock={toggleLock}
+        />
         <RosterPicker title={`You get (${partner?.teamName ?? ""})`} players={sortRoster(partner?.players ?? [])} selected={get} onToggle={(id) => toggle(get, setGet, id)} tone="lime" label={label} />
       </div>
 
+      <div ref={simRef} className="scroll-mt-24" />
       <Panel title="Simulation" corners>
         {!result ? (
           <Empty>Pick at least one player on each side to simulate the trade week by week.</Empty>
         ) : (
           <div className="space-y-6">
             <div className="grid gap-3 md:grid-cols-4">
-              <Big label="Verdict" value={result.verdict} tone={result.myDelta > 3 ? "lime" : result.myDelta < -3 ? "rose" : "cyan"} />
-              <Big label="Your lineup, rest of season" value={<Delta value={result.myDelta} suffix=" pts" />} />
+              <Big
+                label="Verdict"
+                value={result.verdict}
+                tone={/win/i.test(result.verdict) ? "lime" : /loss/i.test(result.verdict) ? "rose" : "cyan"}
+                sub={
+                  impact ? (
+                    <>
+                      Playoffs {impact.before.playoffPct}% → <span className="font-mono text-slate-200">{impact.after.playoffPct}%</span> · Title{" "}
+                      {impact.before.titlePct}% → <span className="font-mono text-slate-200">{impact.after.titlePct}%</span>
+                    </>
+                  ) : undefined
+                }
+              />
+              <Big
+                label="Your lineup, rest of season"
+                value={<Delta value={result.myDelta} suffix=" pts" />}
+                sub={<>Avg <Delta value={result.perWeekAvg} suffix=" / week" /></>}
+              />
               <Big label="Next 3 weeks / playoffs" value={<span><Delta value={result.myNearDelta} /> / <Delta value={result.myPlayoffDelta} /></span>} />
               <Big
                 label="They accept?"
@@ -130,15 +177,29 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
               </div>
             )}
 
-            {(result.flags.length > 0 || result.myDrops.length > 0 || result.theirDrops.length > 0) && (
-              <ul className="space-y-1.5 text-sm text-slate-300">
-                {result.flags.map((f, i) => (
-                  <li key={i}>• {f}</li>
-                ))}
-                {result.myDrops.length > 0 && <li>• You would need to drop: {names(result.myDrops)}</li>}
-                {result.theirDrops.length > 0 && <li>• They would need to drop: {names(result.theirDrops)}</li>}
-              </ul>
-            )}
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <div className="hud-title mb-2">Why</div>
+                <ul className="space-y-1.5 text-sm text-slate-300">
+                  {result.reasons.map((f, i) => (
+                    <li key={i}>• {f}</li>
+                  ))}
+                </ul>
+              </div>
+              {result.flags.length > 0 && (
+                <div>
+                  <div className="hud-title mb-2 !text-amber-300">Watch out</div>
+                  <ul className="space-y-1.5 text-sm text-amber-100/90">
+                    {result.flags.map((f, i) => (
+                      <li key={i}>• {f}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-slate-500">
+              The simulator plays out every remaining week with your best lineup, counts depth for injuries and byes, and weighs playoff weeks 1.5x. It can&apos;t see news or role changes, so ask the AI before you send it.
+            </p>
 
             <div className="flex flex-wrap items-center gap-3">
               <button
@@ -146,14 +207,13 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
                 onClick={() =>
                   askAgent(
                     `Analyze this trade like an expert: I give ${names(give)} to ${partner?.teamName} and get ${names(get)}. ` +
-                      `Use evaluate_trade, then check current injury news, roles and usage for every player involved, my roster fit, byes, and the playoff schedule. ` +
+                      `Use evaluate_trade, then check news and get_player for every player involved (injuries, role, usage trend, schedule), my roster fit and depth, byes, the playoff schedule, my strategy rules (players I won't trade, selling low), and the other manager's needs and trade habits. ` +
                       `Tell me if I should accept, and if not, suggest a fair counter they would actually accept.`
                   )
                 }
               >
                 ✦ Ask the AI agent for a full breakdown
               </button>
-              <span className="text-xs text-slate-500">The simulator handles the math. The agent adds news, injury history and negotiation.</span>
             </div>
           </div>
         )}
@@ -169,6 +229,8 @@ function RosterPicker({
   onToggle,
   tone,
   label,
+  locked,
+  onLock,
 }: {
   title: string;
   players: PlayerView[];
@@ -176,6 +238,8 @@ function RosterPicker({
   onToggle: (id: string) => void;
   tone: "rose" | "lime";
   label: (v: PlayerView) => string;
+  locked?: string[];
+  onLock?: (id: string) => void;
 }) {
   const sel = tone === "rose" ? "border-rose-400/60 bg-rose-500/10" : "border-lime-400/60 bg-lime-500/10";
   const { open } = usePlayerDrawer();
@@ -191,10 +255,33 @@ function RosterPicker({
               className={`flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition ${on ? sel : "border-transparent hover:bg-white/5"}`}
             >
               <PosTag pos={v.p.pos} />
-              <span className="font-medium text-slate-100">{v.p.name}</span>
-              <span className="text-xs text-slate-500">{v.p.team}</span>
+              <span className="min-w-0 truncate font-medium text-slate-100">{v.p.name}</span>
+              <span className="hidden text-xs text-slate-500 sm:inline">{v.p.team}</span>
               <InjuryTag status={v.p.injury} />
               <span className="ml-auto whitespace-nowrap font-mono text-xs text-slate-400">{label(v)}</span>
+              {onLock && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  aria-label={locked?.includes(v.p.id) ? `Unlock ${v.p.name}` : `Never offer ${v.p.name}`}
+                  title={locked?.includes(v.p.id) ? "Locked: never offered in trade ideas" : "Lock: never offer him in trade ideas"}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onLock(v.p.id);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.stopPropagation();
+                      onLock(v.p.id);
+                    }
+                  }}
+                  className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border text-[11px] ${
+                    locked?.includes(v.p.id) ? "border-amber-300/60 text-amber-300" : "border-white/10 text-slate-600 hover:text-slate-300"
+                  }`}
+                >
+                  {locked?.includes(v.p.id) ? "🔒" : "○"}
+                </span>
+              )}
               <span
                 role="button"
                 tabIndex={0}
@@ -209,7 +296,7 @@ function RosterPicker({
                     open(v.p.id);
                   }
                 }}
-                className="grid h-6 w-6 place-items-center rounded-full border border-white/10 text-[11px] text-slate-400 hover:border-cyan-300/50 hover:text-cyan-200"
+                className="grid h-6 w-6 shrink-0 place-items-center rounded-full border border-white/10 text-[11px] text-slate-400 hover:border-cyan-300/50 hover:text-cyan-200"
               >
                 i
               </span>
@@ -229,5 +316,132 @@ function Big({ label, value, sub, tone = "cyan" }: { label: string; value: React
       <div className={`mt-1 font-display text-lg font-bold ${t}`}>{value}</div>
       {sub && <div className="mt-1 text-xs text-slate-400">{sub}</div>}
     </div>
+  );
+}
+
+const NEEDS: (Position | "ANY")[] = ["ANY", "RB", "WR", "TE", "QB"];
+
+type Idea = ReturnType<LeagueModel["findTradesWith"]>[number];
+
+function TradeFinder({
+  model,
+  myId,
+  locked,
+  onLoad,
+  askAgent,
+}: {
+  model: LeagueModel;
+  myId: number;
+  locked: string[];
+  onLoad: (partnerId: number, give: string[], get: string[]) => void;
+  askAgent: (p: string) => void;
+}) {
+  const [need, setNeed] = useState<Position | "ANY">("ANY");
+  const [ideas, setIdeas] = useState<Idea[] | null>(null);
+  const [progress, setProgress] = useState<number | null>(null);
+  const runId = useRef(0);
+  const name = (id: string) => model.view(id)?.p.name ?? id;
+
+  const scan = () => {
+    const id = ++runId.current;
+    const partners = model.teams.filter((t) => t.rosterId !== myId);
+    const found: Idea[] = [];
+    setIdeas(null);
+    setProgress(0);
+    // One team per tick keeps the page responsive on phones.
+    const step = (i: number) => {
+      if (id !== runId.current) return;
+      if (i >= partners.length) {
+        setIdeas(found.sort((a, b) => b.score - a.score).slice(0, 8));
+        setProgress(null);
+        return;
+      }
+      found.push(...model.findTradesWith(myId, partners[i].rosterId, need, locked));
+      setProgress((i + 1) / partners.length);
+      setTimeout(() => step(i + 1), 0);
+    };
+    setTimeout(() => step(0), 0);
+  };
+
+  return (
+    <Panel
+      title="Trade finder"
+      right={
+        locked.length > 0 ? (
+          <span className="hidden text-[11px] text-amber-300/80 sm:inline">🔒 {locked.map(name).join(", ")}</span>
+        ) : (
+          <span className="hidden text-[11px] text-slate-500 sm:inline">Tap ○ on your players to lock them</span>
+        )
+      }
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm text-slate-400">Find me</span>
+        <div className="flex rounded-lg border border-white/10 p-0.5 font-mono text-xs">
+          {NEEDS.map((n) => (
+            <button
+              key={n}
+              onClick={() => setNeed(n)}
+              className={`rounded-md px-2.5 py-1 ${need === n ? "bg-cyan-400/20 text-cyan-100" : "text-slate-400 hover:text-slate-100"}`}
+            >
+              {n === "ANY" ? "Any upgrade" : n}
+            </button>
+          ))}
+        </div>
+        <button className="btn ml-auto" onClick={scan} disabled={progress != null}>
+          {progress != null ? `Scanning ${Math.round(progress * 100)}%` : "Scan the league"}
+        </button>
+      </div>
+      {ideas && !ideas.length && (
+        <p className="mt-4 text-sm text-slate-400">
+          No fair deals found that clearly help you at {need === "ANY" ? "any position" : need}. Try another position or unlock someone.
+        </p>
+      )}
+      {ideas && ideas.length > 0 && (
+        <ul className="mt-4 divide-y divide-white/5">
+          {ideas.map((i, k) => {
+            const r = i.result;
+            const partner = model.team(i.partnerId);
+            return (
+              <li key={k} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
+                <div className="min-w-0 flex-1 text-sm">
+                  <div className="text-slate-200">
+                    <span className="text-rose-300">{i.give.map(name).join(" + ")}</span>
+                    <span className="mx-2 text-slate-500">for</span>
+                    <span className="text-lime-300">{i.get.map(name).join(" + ")}</span>
+                  </div>
+                  <div className="mt-0.5 text-xs text-slate-500">
+                    {partner?.teamName} · <Delta value={r.perWeekAvg} suffix="/wk" /> · playoffs <Delta value={r.myPlayoffDelta} /> · {r.acceptance} to accept
+                    {r.market ? ` · market ${r.market.ratio <= 1.1 ? "fair" : "you pay a bit more"}` : ""}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button className="btn btn-ghost" onClick={() => onLoad(i.partnerId, i.give, i.get)}>
+                    Simulate
+                  </button>
+                  <button
+                    className="btn btn-ghost"
+                    onClick={() =>
+                      askAgent(
+                        `Check this trade idea: I give ${i.give.map(name).join(" + ")} to ${partner?.teamName} for ${i.get
+                          .map(name)
+                          .join(" + ")}. Use evaluate_trade, check news and roles for every player, my roster fit, and their needs and trade habits. Should I send it, tweak it, or skip it?`
+                      )
+                    }
+                  >
+                    ✦ Ask AI
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {!ideas && progress == null && (
+        <p className="mt-3 text-xs text-slate-500">
+          Scans every team for deals that upgrade your lineup, look fair by market value, and don&apos;t hurt their lineup much, then runs each one
+          through the full simulator.
+        </p>
+      )}
+    </Panel>
   );
 }

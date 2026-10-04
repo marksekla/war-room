@@ -24,6 +24,12 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+try:  # self-calibration lives next to this file
+    from calibrate import calibrate
+except ImportError:  # pragma: no cover
+    sys.path.append(os.path.dirname(__file__))
+    from calibrate import calibrate
+
 NFLVERSE = "https://github.com/nflverse/nflverse-data/releases/download"
 FFOPP = "https://github.com/ffverse/ffopportunity/releases/download/latest-data"
 IDS = "https://raw.githubusercontent.com/dynastyprocess/data/master/files/db_playerids.csv"
@@ -126,6 +132,36 @@ def key_starters(snaps: pd.DataFrame, inj: pd.DataFrame, pfr_to_gsis: dict) -> d
         for unit in out[tm]:
             out[tm][unit].sort(key=lambda x: -x["pct"])
     return out
+
+
+def snapshot_market(history: dict, season: int, games: pd.DataFrame) -> dict:
+    """Saves FantasyCalc values before each week so the model can later learn how much
+    market value predicts real results. Keeps this season and last season only."""
+    history = {k: v for k, v in (history or {}).items() if int(k) >= season - 1}
+    try:
+        g = games[(games.season == season) & (games.game_type == "REG") & games.result.isna()]
+        if g.empty:
+            return history
+        week = int(g.week.min())
+        import urllib.request
+        req = urllib.request.Request(
+            "https://api.fantasycalc.com/values/current?isDynasty=false&numQbs=1&numTeams=12&ppr=1",
+            headers={"accept": "application/json", "user-agent": "war-room"},
+        )
+        with urllib.request.urlopen(req, timeout=60) as r:
+            rows = json.loads(r.read().decode("utf-8"))
+        snap = {}
+        for row in rows:
+            sid = (row.get("player") or {}).get("sleeperId")
+            val = row.get("redraftValue") or row.get("value")
+            if sid and isinstance(val, (int, float)):
+                snap[str(sid)] = int(val)
+        if snap:
+            history.setdefault(str(season), {})[str(week)] = snap
+            log(f"  market snapshot: {len(snap)} players for week {week}")
+    except Exception as e:  # noqa: BLE001
+        log(f"  market snapshot skipped ({e.__class__.__name__})")
+    return history
 
 
 def default_season() -> int:
@@ -485,6 +521,26 @@ def main() -> None:
         "starters": starters,
         "startersReportWeek": int(inj[inj.season_type == "REG"].week.max()) if not inj.empty else None,
     }
+    # Learn the model's weights from past results (only re-runs when a new week finishes).
+    prev = None
+    history = {}
+    if os.path.exists(OUT):
+        try:
+            with open(OUT) as fh:
+                old_data = json.load(fh)
+            prev = old_data.get("calib")
+            history = old_data.get("marketHistory") or {}
+        except (OSError, ValueError):
+            prev = None
+    data["marketHistory"] = snapshot_market(history, season, games)
+    try:
+        data["calib"] = (
+            calibrate(season, max_week, ids, games, prev, data["marketHistory"]) if not ids.empty and not games.empty else prev
+        )
+    except Exception as e:  # noqa: BLE001 - calibration is a bonus, never block the data build
+        log(f"Calibration failed ({e.__class__.__name__}: {e}); keeping previous weights.")
+        data["calib"] = prev
+
     if not out_players and os.path.exists(OUT):
         log("No player data came back; keeping the existing file.")
         return

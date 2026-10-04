@@ -24,12 +24,15 @@ interface Saved {
   rosterId: number | null;
   username: string;
   ai: AiSettings;
+  /** Players you never want offered in trade ideas (per browser). */
+  untouchables: string[];
 }
 
 const defaultSaved: Saved = {
   leagueId: "",
   rosterId: null,
   username: "",
+  untouchables: [],
   ai: { provider: "anthropic", apiKey: "", keys: {}, model: "", baseUrl: "", webSearch: true, strategy: DEFAULT_STRATEGY },
 };
 

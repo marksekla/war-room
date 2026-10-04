@@ -3,11 +3,16 @@
 import { useMemo, useState } from "react";
 import type { LeagueModel, PlayerView } from "@/lib/model";
 import { Delta, InjuryTag, Meter, Panel, PosTag, RankChip, Stat } from "./ui";
-import { PlayerName } from "./PlayerDrawer";
+import { PlayerName, usePlayerDrawer } from "./PlayerDrawer";
 
 const POS_ORDER: Record<string, number> = { QB: 0, RB: 1, WR: 2, TE: 3, K: 4, DEF: 5 };
 
-export default function Dashboard({ model, myId }: { model: LeagueModel; myId: number }) {
+export default function Dashboard({ model, myId, go }: { model: LeagueModel; myId: number; go?: (tab: "lineup" | "waivers" | "trades") => void }) {
+  const { open } = usePlayerDrawer();
+  const todo = useMemo(() => model.actionItems(myId), [model, myId]);
+  const odds = useMemo(() => (model.activity?.schedule ? model.playoffOdds() : null), [model]);
+  const oddsBy = new Map((odds ?? []).map((o) => [o.rosterId, o]));
+  const myOdds = oddsBy.get(myId);
   const me = model.team(myId)!;
   const roster = useMemo(
     () =>
@@ -56,7 +61,7 @@ export default function Dashboard({ model, myId }: { model: LeagueModel; myId: n
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat label="Record" value={`${me.wins}-${me.losses}${me.ties ? `-${me.ties}` : ""}`} sub={`#${rank} of ${model.teams.length} in standings`} />
+        <Stat label="Record" value={`${me.wins}-${me.losses}${me.ties ? `-${me.ties}` : ""}`} sub={`#${rank} of ${model.teams.length}${myOdds ? ` · ${myOdds.playoffPct}% to make playoffs` : " in standings"}`} />
         <Stat label="Points for" value={me.pf.toFixed(1)} sub={`#${pfRank} in league`} tone="violet" />
         <Stat
           label={`Week ${model.week} projection`}
@@ -71,6 +76,31 @@ export default function Dashboard({ model, myId }: { model: LeagueModel; myId: n
           tone="amber"
         />
       </div>
+
+      {todo.length > 0 && (
+        <Panel title={`Week ${model.week} to-do`}>
+          <ul className="-my-1 divide-y divide-white/5">
+            {todo.map((t, i) => {
+              const dot = { rose: "bg-rose-400", amber: "bg-amber-300", lime: "bg-lime-300", cyan: "bg-cyan-300" }[t.tone];
+              const act = t.tab && go ? () => go(t.tab!) : t.playerId ? () => open(t.playerId!) : undefined;
+              return (
+                <li key={i}>
+                  <button
+                    type="button"
+                    disabled={!act}
+                    onClick={act}
+                    className="flex w-full items-start gap-3 py-2 text-left text-sm text-slate-200 enabled:hover:text-cyan-100"
+                  >
+                    <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot}`} />
+                    <span className="min-w-0 flex-1">{t.text}</span>
+                    {act && <span className="shrink-0 text-slate-500">›</span>}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </Panel>
+      )}
 
       <Panel
         title="Weekly outlook to the title"
@@ -185,26 +215,57 @@ export default function Dashboard({ model, myId }: { model: LeagueModel; myId: n
         </p>
       </Panel>
 
-      <div className="grid items-start gap-6 lg:grid-cols-2">
-        <Panel title="Standings">
+      <div className="grid items-start gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+        <Panel
+          title={odds ? "Standings and playoff odds" : "Standings"}
+          right={odds ? <span className="hidden text-[11px] text-slate-500 sm:inline">Simulated {(4000).toLocaleString()}x</span> : undefined}
+        >
           <ul className="-my-1 divide-y divide-white/5">
-            {standings.map((t, i) => (
-              <li
-                key={t.rosterId}
-                className={`flex items-center gap-3 rounded px-1 py-1.5 text-sm ${t.rosterId === myId ? "bg-cyan-400/10" : ""}`}
-              >
-                <span className="w-5 text-right font-mono text-xs text-slate-500">{i + 1}</span>
-                <span className="min-w-0 flex-1 truncate">
-                  <span className="font-medium text-slate-100">{t.teamName}</span>
-                  <span className="ml-2 hidden text-xs text-slate-500 sm:inline">{t.ownerName}</span>
-                </span>
-                <span className="w-10 text-right font-mono text-slate-200">
-                  {t.wins}-{t.losses}
-                </span>
-                <span className="w-14 text-right font-mono text-slate-400">{t.pf.toFixed(1)}</span>
+            {odds && (
+              <li className="flex items-center gap-3 px-1 pb-1.5 font-display text-[10px] uppercase tracking-wider text-cyan-300/70">
+                <span className="w-5" />
+                <span className="flex-1">Team</span>
+                <span className="w-10 text-right">W-L</span>
+                <span className="hidden w-14 text-right sm:inline">PF</span>
+                <span className="w-14 text-right">Playoffs</span>
+                <span className="w-11 text-right">Title</span>
               </li>
-            ))}
+            )}
+            {standings.map((t, i) => {
+              const o = oddsBy.get(t.rosterId);
+              const tone = !o ? "" : o.playoffPct >= 70 ? "text-lime-300" : o.playoffPct <= 25 ? "text-rose-300" : "text-slate-200";
+              return (
+                <li
+                  key={t.rosterId}
+                  className={`flex items-center gap-3 rounded px-1 py-1.5 text-sm ${t.rosterId === myId ? "bg-cyan-400/10" : ""}`}
+                >
+                  <span className="w-5 text-right font-mono text-xs text-slate-500">{i + 1}</span>
+                  <span className="min-w-0 flex-1 truncate">
+                    <span className="font-medium text-slate-100">{t.teamName}</span>
+                    <span className="ml-2 hidden text-xs text-slate-500 lg:inline">{t.ownerName}</span>
+                  </span>
+                  <span className="w-10 text-right font-mono text-slate-200">
+                    {t.wins}-{t.losses}
+                  </span>
+                  <span className={`${odds ? "hidden sm:inline" : ""} w-14 text-right font-mono text-slate-400`}>{t.pf.toFixed(1)}</span>
+                  {o && (
+                    <>
+                      <span className={`w-14 text-right font-mono ${tone}`} title={o.byePct != null ? `Bye: ${o.byePct}%` : undefined}>
+                        {o.playoffPct}%
+                      </span>
+                      <span className="w-11 text-right font-mono text-fuchsia-300">{o.titlePct}%</span>
+                    </>
+                  )}
+                </li>
+              );
+            })}
           </ul>
+          {odds && (
+            <p className="mt-3 text-xs text-slate-500">
+              Plays out every remaining game on your league&apos;s schedule with each team&apos;s projected lineup, then the playoff bracket. Tiebreak:
+              points for.
+            </p>
+          )}
         </Panel>
 
         <Panel title="League wire">

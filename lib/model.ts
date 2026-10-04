@@ -155,6 +155,10 @@ export class LeagueModel {
   private advByGsis = new Map<string, NflPlayer>();
   private espnById = new Map<string, EspnInjury>();
   private espnByName = new Map<string, EspnInjury>();
+  /** Week an injured player is expected back (ESPN return date, or a default for IR/PUP). */
+  readonly returnWeek = new Map<string, number>();
+  /** Teammates whose role should shrink when a better player returns from injury. */
+  readonly roleShift = new Map<string, { fromWeek: number; mult: number; by: string; byPos: string }>();
   readonly activity: LeagueActivity | null;
 
   constructor(
@@ -336,9 +340,30 @@ export class LeagueModel {
     if (!opp) return 1;
     const f = this.dvp.get(opp)?.get(pos)?.factor;
     if (!f) return 1;
+    const learned = this.extras.nfl?.calib?.matchup?.[pos]?.dvp;
     const weeksOfData = this.stats.length;
-    const damp = Math.min(0.45, 0.12 * weeksOfData);
+    // Learned strength when available; otherwise grow trust slowly as weeks of data pile up.
+    const damp = learned != null ? (weeksOfData >= 2 ? learned : learned * 0.5) : Math.min(0.45, 0.12 * weeksOfData);
     return Math.max(0.75, Math.min(1.25, 1 + damp * (f - 1)));
+  }
+
+  /** Vegas: a team expected to score more than the week's average lifts its players. */
+  vegasFactor(pos: Position, g: GameInfo | null, week: number): number {
+    if (!g || g.impliedTotal == null) return 1;
+    const totals: number[] = [];
+    for (const x of this.schedule.games) {
+      if (x.week !== week || x.total == null || x.spread == null) continue;
+      totals.push(x.total / 2);
+    }
+    const avgImplied = totals.length ? totals.reduce((a, b) => a + b, 0) / totals.length : 22.5;
+    if (pos === "DEF") {
+      // Defenses score off the other team: a low opponent implied total means fewer points allowed and more sacks/turnovers.
+      const oppImplied = g.game.total != null ? g.game.total - g.impliedTotal : null;
+      if (oppImplied == null) return 1;
+      return Math.max(0.75, Math.min(1.3, 1 + 0.6 * (1 - oppImplied / avgImplied)));
+    }
+    const a = this.extras.nfl?.calib?.matchup?.[pos]?.vegas ?? (pos === "K" ? 0.3 : 0.2);
+    return Math.max(0.8, Math.min(1.25, 1 + a * (g.impliedTotal / avgImplied - 1)));
   }
 
   // ---------- player views ----------
@@ -398,13 +423,31 @@ export class LeagueModel {
       const espnLine = raw.espnId ? this.extras.espnProj?.[raw.espnId] : undefined;
       const projEspn = espnLine ? scoreLine(espnLine, this.scoring) : null;
       // Two projection sources averaged beat either one alone.
+      const pb = this.extras.nfl?.calib?.projBlend ?? { sleeper: 0.5, espn: 0.5 };
       const projNext =
         projSleeper != null && projEspn != null && projSleeper > 0 && projEspn > 0
-          ? (projSleeper + projEspn) / 2
+          ? (pb.sleeper * projSleeper + pb.espn * projEspn) / (pb.sleeper + pb.espn || 1)
           : projSleeper ?? projEspn;
 
+      // Learned weights (scripts/calibrate.py) when available, hand-set defaults otherwise.
+      const calib = this.extras.nfl?.calib;
+      const xfpRaw = adv?.s?.xfp;
+      const fpRaw = adv?.s?.fp;
+      const conv = fpRaw && fpRaw > 2 && ppg > 0 ? Math.max(0.6, Math.min(1.4, ppg / fpRaw)) : 1; // PPR -> league scoring
+      const cw = calib?.weights?.[p.pos];
+      const cwNoProj = calib?.weightsNoProj?.[p.pos];
+      let learned: number | null = null;
+      if (log.length >= 2 && xfpRaw) {
+        if (cw && projNext != null && projNext > 0) learned = cw.proj * projNext + cw.last3 * last3 + cw.ppg * ppg + cw.xfp * xfpRaw * conv;
+        else if (cwNoProj && (projNext == null || projNext <= 0)) learned = cwNoProj.last3 * last3 + cwNoProj.ppg * ppg + cwNoProj.xfp * xfpRaw * conv;
+        else if (cwNoProj && projNext != null && projNext > 0)
+          learned = 0.5 * projNext + 0.5 * (cwNoProj.last3 * last3 + cwNoProj.ppg * ppg + cwNoProj.xfp * xfpRaw * conv);
+      }
+
       let valuePg: number;
-      if (log.length >= 2) {
+      if (learned != null) {
+        valuePg = learned;
+      } else if (log.length >= 2) {
         valuePg = projNext != null && projNext > 0 ? 0.45 * projNext + 0.35 * last3 + 0.2 * ppg : 0.6 * last3 + 0.4 * ppg;
       } else if (log.length === 1) {
         valuePg = projNext != null && projNext > 0 ? 0.65 * projNext + 0.35 * ppg : ppg * 0.85;
@@ -413,11 +456,8 @@ export class LeagueModel {
       }
       // Opportunity is stickier than efficiency: lean slightly toward expected points
       // (xFP, from nflverse/ffopportunity), converted to this league's scoring.
-      const xfp = adv?.s?.xfp;
-      const fpPpr = adv?.s?.fp;
-      if (xfp && log.length >= 2 && ["RB", "WR", "TE"].includes(p.pos)) {
-        const conv = fpPpr && fpPpr > 2 && ppg > 0 ? Math.max(0.6, Math.min(1.4, ppg / fpPpr)) : 1;
-        valuePg = 0.85 * valuePg + 0.15 * xfp * conv;
+      if (learned == null && xfpRaw && log.length >= 2 && ["RB", "WR", "TE"].includes(p.pos)) {
+        valuePg = 0.85 * valuePg + 0.15 * xfpRaw * conv;
       }
 
       const lastGame = log[log.length - 1];
@@ -456,6 +496,9 @@ export class LeagueModel {
       });
     }
 
+    this.applyMarketPrior();
+    this.buildInjuryTimelines();
+
     // Replacement level: the best player you could realistically start after every
     // team fills its lineup. Flex slots are split across eligible positions.
     const n = this.teams.length || 12;
@@ -492,6 +535,56 @@ export class LeagueModel {
     return this.views.get(id);
   }
 
+
+  // ---------- injury timelines ----------
+
+  /**
+   * Turns injury designations into "out until week N" using ESPN's estimated return dates
+   * (default: 4 weeks for IR/PUP/suspension, 1 week for Out). Then, when a clearly better
+   * player at the same position is coming back, his replacement's role is marked to shrink
+   * from that week, so expiring roles show up in trades and rest-of-season values.
+   */
+  private buildInjuryTimelines() {
+    const firstWeekOnOrAfter = (team: string, iso: string) => {
+      const t = new Date(iso).getTime();
+      if (!Number.isFinite(t)) return null;
+      for (let w = this.week; w <= 18; w++) {
+        const g = this.gameFor(team, w);
+        if (g && new Date(g.game.kickoff).getTime() >= t - 12 * 3600 * 1000) return w;
+      }
+      return 19; // not back this season
+    };
+    for (const v of this.views.values()) {
+      const inj = v.p.injury;
+      if (!inj || !v.p.team || v.p.pos === "DEF") continue;
+      const long = LONG_TERM.has(inj);
+      if (!long && inj !== "Out") continue;
+      let back: number | null = null;
+      if (v.espn?.returnDate) back = firstWeekOnOrAfter(v.p.team, v.espn.returnDate);
+      if (back == null) back = this.week + (long ? 4 : 1);
+      back = Math.max(back, this.week + 1);
+      this.returnWeek.set(v.p.id, back);
+    }
+    // Expiring roles: a returning player who is clearly better takes work back from his fill-in.
+    for (const [id, back] of this.returnWeek) {
+      const p = this.views.get(id);
+      if (!p || !["RB", "WR", "TE"].includes(p.p.pos) || back > this.lastWeek) continue;
+      const pv = p.market?.value ?? 0;
+      if (pv < 2500 && p.valuePg < 9) continue; // only players who'd reclaim a real role
+      for (const t of this.views.values()) {
+        if (t.p.id === id || t.p.team !== p.p.team || t.p.pos !== p.p.pos) continue;
+        if (t.p.injury && LONG_TERM.has(t.p.injury)) continue;
+        const tv = t.market?.value ?? 0;
+        const better = pv && tv ? pv > tv * 1.15 : p.valuePg > t.valuePg * 1.1;
+        const filling = (t.adv?.l3?.snap ?? t.snapShare ?? 0) >= 0.45 || t.p.depth === 1;
+        if (!better || !filling) continue;
+        const mult = p.p.pos === "RB" ? 0.7 : 0.85;
+        const cur = this.roleShift.get(t.p.id);
+        if (!cur || back < cur.fromWeek) this.roleShift.set(t.p.id, { fromWeek: back, mult, by: p.p.name, byPos: p.p.pos });
+      }
+    }
+  }
+
   // ---------- weekly expectation ----------
 
   /** Expected points for a player in a given week: value x matchup, zero on bye or out. */
@@ -502,16 +595,23 @@ export class LeagueModel {
     if (!g) return 0; // bye or no game
     const inj = v.p.injury;
     const ahead = week - this.week;
-    if (inj && LONG_TERM.has(inj) && ahead < 4) return 0;
-    if (inj === "Out" && ahead === 0) return 0;
     let mult = 1;
-    if (inj === "Out" && ahead === 1) mult = 0.7;
-    if (inj === "Doubtful" && ahead === 0) mult = 0.25;
-    if (inj === "Questionable" && ahead === 0) mult = 0.85;
-    if (inj && LONG_TERM.has(inj) && ahead >= 4) mult = 0.6;
+    const back = this.returnWeek.get(id);
+    if (back != null) {
+      if (week < back) return 0;
+      // First games back usually come with limited snaps; long absences also carry setback risk.
+      const long = inj != null && LONG_TERM.has(inj);
+      if (week === back) mult = long ? 0.75 : 0.85;
+      else if (week === back + 1 && long) mult = 0.9;
+    } else {
+      if (inj === "Doubtful" && ahead === 0) mult = 0.25;
+      if (inj === "Questionable" && ahead === 0) mult = 0.85;
+    }
+    const shift = this.roleShift.get(id);
+    if (shift && week >= shift.fromWeek) mult *= shift.mult;
     let base = v.valuePg;
     if (ahead === 0 && v.projNext != null && v.projNext > 0) base = 0.6 * v.projNext + 0.4 * v.valuePg;
-    return base * mult * this.matchupFactor(v.p.pos, g.opp);
+    return base * mult * this.matchupFactor(v.p.pos, g.opp) * this.vegasFactor(v.p.pos, g, week);
   }
 
   remainingWeeks(): number[] {
@@ -521,7 +621,64 @@ export class LeagueModel {
   }
 
   rosPoints(id: string): number {
-    return this.remainingWeeks().reduce((a, w) => a + this.expected(id, w), 0);
+    const v = this.views.get(id);
+    return this.remainingWeeks().reduce((a, w) => a + this.expected(id, w) * (v ? this.availability(v, w) : 1), 0);
+  }
+
+  /**
+   * Chance a player is active in a future week, from typical NFL weekly availability by
+   * position, adjusted for age (RBs) and injuries that keep showing up on the report.
+   * The current week uses the actual injury designation instead (see expected()).
+   */
+  availability(v: PlayerView, week: number): number {
+    if (week <= this.week) return 1;
+    const base: Record<string, number> = { QB: 0.95, RB: 0.9, WR: 0.93, TE: 0.93, K: 0.99, DEF: 1 };
+    let p = this.nfl?.calib?.avail?.[v.p.pos] ?? base[v.p.pos] ?? 0.93;
+    if (v.p.pos === "RB" && (v.p.age ?? 0) >= 29) p -= 0.02;
+    const pr = v.adv?.prac;
+    if (pr && pr.wks >= 3 && pr.inj && !/rest|not injury/i.test(pr.inj)) p -= 0.04;
+    return p;
+  }
+
+  /**
+   * Early-season stats are noisy. FantasyCalc values come from thousands of real trades and
+   * bake in talent, role and health, so they act as a prior: we map market value to points
+   * per game by position (fit on this league's own numbers) and blend it in.
+   */
+  private applyMarketPrior() {
+    if (!this.extras.values) return;
+    for (const pos of ["QB", "RB", "WR", "TE"] as Position[]) {
+      const rows = [...this.views.values()].filter((v) => v.p.pos === pos && v.market && v.games >= 2 && v.valuePg > 0);
+      if (rows.length < 8) continue;
+      const xs = rows.map((v) => Math.sqrt(v.market!.value));
+      const ys = rows.map((v) => v.valuePg);
+      const mx = avg(xs);
+      const my = avg(ys);
+      let num = 0;
+      let den = 0;
+      xs.forEach((x, i) => {
+        num += (x - mx) * (ys[i] - my);
+        den += (x - mx) ** 2;
+      });
+      if (den <= 0) continue;
+      const b = num / den;
+      const a = my - b * mx;
+      if (b <= 0) continue;
+      for (const v of this.views.values()) {
+        if (v.p.pos !== pos || !v.market) continue;
+        const implied = Math.max(0, a + b * Math.sqrt(v.market.value));
+        const learned = this.extras.nfl?.calib?.market?.[pos];
+        const w =
+          learned != null
+            ? Math.min(0.6, v.games >= 2 ? learned : learned * 1.5)
+            : v.games >= 4
+              ? 0.2
+              : v.games >= 2
+                ? 0.3
+                : 0.5; // less data = lean on the market more
+        v.valuePg = round1(Math.max(0, (1 - w) * v.valuePg + w * implied));
+      }
+    }
   }
 
   // ---------- lineups ----------
@@ -550,8 +707,39 @@ export class LeagueModel {
     return { filled, total, bench: ids.filter((id) => !used.has(id)) };
   }
 
+  /**
+   * Expected lineup points for a week. The current week uses known statuses. Future weeks
+   * account for the chance any starter misses time and a bench player fills in, so roster
+   * depth has real value (this is what makes 2-for-1 trades fair to judge).
+   */
   teamWeekPoints(ids: string[], week: number) {
-    return this.lineup(ids, (id) => this.expected(id, week)).total;
+    if (week <= this.week) return this.lineup(ids, (id) => this.expected(id, week)).total;
+    const pool = ids
+      .map((id) => {
+        const v = this.views.get(id);
+        return v ? { id, pos: v.p.pos, val: this.expected(id, week), p: this.availability(v, week) } : null;
+      })
+      .filter((x): x is { id: string; pos: Position; val: number; p: number } => !!x && x.val > 0)
+      .sort((a, b) => b.val - a.val);
+    const used = new Map<string, number>();
+    const fixed = this.slots.filter((s) => !(s in FLEX_SLOTS));
+    const flex = this.slots.filter((s) => s in FLEX_SLOTS).sort((a, b) => FLEX_SLOTS[a].length - FLEX_SLOTS[b].length);
+    let total = 0;
+    for (const slot of [...fixed, ...flex]) {
+      const eligible = slot in FLEX_SLOTS ? FLEX_SLOTS[slot] : [slot as Position];
+      let remaining = 1; // chance nobody better has filled this slot yet
+      for (const c of pool) {
+        if (!eligible.includes(c.pos)) continue;
+        const free = c.p - (used.get(c.id) ?? 0);
+        if (free <= 0.001) continue;
+        const take = remaining * free;
+        total += take * c.val;
+        used.set(c.id, (used.get(c.id) ?? 0) + take);
+        remaining *= 1 - free;
+        if (remaining < 0.01) break;
+      }
+    }
+    return total;
   }
 
   teamRos(ids: string[]) {
@@ -617,8 +805,12 @@ export class LeagueModel {
     let myAfter = myBefore.filter((id) => !give.includes(id)).concat(get);
     let theirAfter = theirBefore.filter((id) => !get.includes(id)).concat(give);
 
-    const trim = (ids: string[], protect: string[]) => {
+    // Too many players: drop the least valuable bench player. Too few: the open spot gets the
+    // best free agent, because that spot has real value in a 2-for-1.
+    const fa = this.freeAgents("ALL").filter((v) => !["K", "DEF"].includes(v.p.pos));
+    const fit = (ids: string[], protect: string[]) => {
       const drops: string[] = [];
+      const adds: string[] = [];
       let list = [...ids];
       while (list.length > this.rosterLimit) {
         const keep = this.lineup(list, (id) => this.views.get(id)?.valuePg ?? 0);
@@ -628,18 +820,30 @@ export class LeagueModel {
         drops.push(bench[0]);
         list = list.filter((id) => id !== bench[0]);
       }
-      return { list, drops };
+      while (list.length < this.rosterLimit) {
+        const pick = fa.find((v) => !list.includes(v.p.id) && !adds.includes(v.p.id));
+        if (!pick) break;
+        adds.push(pick.p.id);
+        list.push(pick.p.id);
+      }
+      return { list, drops, adds };
     };
-    const myTrim = trim(myAfter, get);
-    const theirTrim = trim(theirAfter, give);
-    myAfter = myTrim.list;
-    theirAfter = theirTrim.list;
+    const myFit = fit(myAfter, get);
+    const theirFit = fit(theirAfter, give);
+    myAfter = myFit.list;
+    theirAfter = theirFit.list;
+    // Fill any spots that are already open today the same way, so only the trade's change is measured.
+    const myBase = fit(myBefore, []);
+    const theirBase = fit(theirBefore, []);
+    const myBeforeFull = myBase.list;
+    const theirBeforeFull = theirBase.list;
+    myFit.adds = myFit.adds.filter((id) => !myBase.adds.includes(id));
 
     const weeks = this.remainingWeeks();
     const perWeek = weeks.map((w) => ({
       week: w,
-      me: round1(this.teamWeekPoints(myAfter, w) - this.teamWeekPoints(myBefore, w)),
-      them: round1(this.teamWeekPoints(theirAfter, w) - this.teamWeekPoints(theirBefore, w)),
+      me: round1(this.teamWeekPoints(myAfter, w) - this.teamWeekPoints(myBeforeFull, w)),
+      them: round1(this.teamWeekPoints(theirAfter, w) - this.teamWeekPoints(theirBeforeFull, w)),
     }));
     const myDelta = round1(perWeek.reduce((a, x) => a + x.me, 0));
     const theirDelta = round1(perWeek.reduce((a, x) => a + x.them, 0));
@@ -647,25 +851,11 @@ export class LeagueModel {
     const myPlayoffDelta = round1(playoffWeeks.reduce((a, x) => a + x.me, 0));
     const nearTerm = perWeek.slice(0, 3);
     const myNearDelta = round1(nearTerm.reduce((a, x) => a + x.me, 0));
+    const restDelta = round1(myDelta - myNearDelta);
 
     const all = [...give, ...get].map((id) => this.views.get(id)).filter(Boolean) as PlayerView[];
     const best = all.slice().sort((a, b) => b.vorp - a.vorp)[0];
     const bestSide = best ? (get.includes(best.p.id) ? "you" : "them") : null;
-
-    const flags: string[] = [];
-    for (const v of all) {
-      if (v.p.injury) flags.push(`${v.p.name}: ${v.p.injury}${v.p.injuryPart ? ` (${v.p.injuryPart})` : ""}`);
-    }
-    if (give.length !== get.length) {
-      flags.push(
-        `${Math.max(give.length, get.length)}-for-${Math.min(give.length, get.length)} trade: the side getting the best single player usually wins` +
-          (bestSide ? `, and that is ${bestSide === "you" ? "you" : "them"} (${best!.p.name}).` : ".")
-      );
-    }
-    if (this.tradeDeadline && this.week > this.tradeDeadline) flags.push("The trade deadline has passed in this league.");
-
-    const verdict =
-      myDelta > 12 ? "Win for you" : myDelta > 3 ? "Slight win for you" : myDelta >= -3 ? "Even" : myDelta >= -12 ? "Slight loss for you" : "Loss for you";
 
     // Market check (FantasyCalc values come from real trades). Stars get a premium,
     // so values are raised to a power before summing, like most trade calculators.
@@ -674,33 +864,181 @@ export class LeagueModel {
     const getVals = mv(get);
     const adj = (vals: number[]) => vals.reduce((a, v) => a + Math.pow(Math.max(0, v), 1.3), 0);
     const hasMarket = giveVals.some((v) => v > 0) && getVals.some((v) => v > 0);
-    const marketRatio = hasMarket ? adj(giveVals) / Math.max(1, adj(getVals)) : null; // >1 = they receive more value
+    const marketRatio = hasMarket ? adj(giveVals) / Math.max(1, adj(getVals)) : null; // >1 = you give more value
+
+    // Verdict: average weekly change, with playoff weeks counting 1.5x because they decide titles.
+    const weight = (w: number) => (w >= this.playoffStart ? 1.5 : 1);
+    const wSum = perWeek.reduce((a, x) => a + weight(x.week), 0) || 1;
+    const perWk = perWeek.reduce((a, x) => a + x.me * weight(x.week), 0) / wSum;
+    const scale = ["Loss for you", "Slight loss for you", "Even", "Slight win for you", "Win for you"];
+    let level = perWk > 1.5 ? 4 : perWk > 0.5 ? 3 : perWk >= -0.5 ? 2 : perWk >= -1.5 ? 1 : 0;
+    const overpay = marketRatio != null && marketRatio > 1.4;
+    if (overpay && level >= 3) level -= 1; // you could likely get the same upgrade for less
+    const verdict = scale[level];
+
+    // Plain-English reasons so the number isn't a black box.
+    const reasons: string[] = [];
+    const flags: string[] = [];
+    const nm = (ids: string[]) => ids.map((id) => this.views.get(id)?.p.name ?? id).join(", ");
+    reasons.push(
+      `Your best lineup changes by ${fmtSigned(perWk)} pts per week on average (${fmtSigned(myDelta)} total through week ${this.lastWeek}).`
+    );
+    if (Math.abs(myNearDelta) >= 3 && Math.sign(myNearDelta) !== Math.sign(restDelta) && Math.abs(restDelta) >= 3)
+      reasons.push(
+        `Most of the swing is short term: ${fmtSigned(myNearDelta)} over the next 3 weeks, then ${fmtSigned(restDelta)} after that.`
+      );
+    if (playoffWeeks.length) reasons.push(`Playoff weeks (${this.playoffStart}-${this.lastWeek}): ${fmtSigned(myPlayoffDelta)} pts.`);
+    const worst = perWeek.slice().sort((a, b) => a.me - b.me)[0];
+    if (worst && worst.me <= -5) {
+      const byes = get.filter((id) => !this.gameFor(this.players[id]?.team ?? null, worst.week)).map((id) => this.players[id]?.name);
+      reasons.push(`Week ${worst.week} is the weak spot (${fmtSigned(worst.me)})${byes.length ? `: ${byes.join(", ")} on bye` : ""}.`);
+    }
+    if (give.length > get.length) {
+      const pos = [...new Set(give.map((id) => this.players[id]?.pos))].filter(Boolean);
+      for (const p of pos) {
+        const left = myAfter.filter((id) => this.players[id]?.pos === p).map((id) => this.views.get(id)!).sort((a, b) => b.valuePg - a.valuePg);
+        reasons.push(`Your ${p} depth after: ${left.map((v) => v.p.name).join(", ") || "none"}.`);
+      }
+    }
+    if (myFit.adds.length) reasons.push(`The open roster spot goes to the best free agent (${nm(myFit.adds)}), which is counted.`);
+    if (myFit.drops.length) reasons.push(`You'd have to drop ${nm(myFit.drops)} to fit everyone.`);
+    if (theirFit.drops.length) flags.push(`They would have to drop ${nm(theirFit.drops)}.`);
+    if (give.length !== get.length && best)
+      flags.push(
+        `${Math.max(give.length, get.length)}-for-${Math.min(give.length, get.length)} trade: the side getting the best single player usually wins, and that is ${bestSide === "you" ? "you" : "them"} (${best.p.name}).`
+      );
+    for (const id of give) {
+      const v = this.views.get(id);
+      if (!v) continue;
+      const recurring = v.adv?.prac && v.adv.prac.wks >= 3 && !/rest|not injury/i.test(v.adv.prac.inj ?? "");
+      if (v.p.injury && !LONG_TERM.has(v.p.injury) && !recurring)
+        flags.push(
+          `Selling ${v.p.name} while he's hurt (${v.p.injury}) is selling low${v.market && v.market.trend < 0 ? ` (market value down ${Math.abs(v.market.trend)} in 30 days)` : ""}. Unless the injury lingers, his value usually comes back.`
+        );
+      if (v.p.injury && recurring) flags.push(`${v.p.name} keeps showing up on the injury report (${v.adv!.prac!.inj}). Moving him now is reasonable.`);
+    }
+    for (const id of get) {
+      const v = this.views.get(id);
+      if (!v) continue;
+      if (v.p.injury) flags.push(`${v.p.name}: ${v.p.injury}${v.p.injuryPart ? ` (${v.p.injuryPart})` : ""}.`);
+      const pr = v.adv?.prac;
+      if (pr && pr.wks >= 3 && !/rest|not injury/i.test(pr.inj ?? "")) flags.push(`${v.p.name} has been on the injury report ${pr.wks} weeks (${pr.inj}). Recurring risk.`);
+      if (v.adv?.s?.fp != null && v.adv.s.xfp != null && v.adv.s.fp - v.adv.s.xfp >= 4)
+        flags.push(`${v.p.name} is scoring ${(v.adv.s.fp - v.adv.s.xfp).toFixed(1)} pts/game above his expected points. Some regression is likely.`);
+    }
+    for (const id of [...give, ...get]) {
+      const v = this.views.get(id);
+      if (!v) continue;
+      const side = give.includes(id) ? "give" : "get";
+      const back = this.returnWeek.get(id);
+      if (back != null && (v.p.injury ? LONG_TERM.has(v.p.injury) : false))
+        reasons.push(`${v.p.name} is expected back ${back > 18 ? "after this season" : `in week ${back}`}, so he counts as zero until then.`);
+      const shift = this.roleShift.get(id);
+      if (shift && shift.fromWeek <= this.lastWeek) {
+        if (side === "give")
+          reasons.push(`Good timing: ${v.p.name}'s role likely shrinks from week ${shift.fromWeek} when ${shift.by} returns, and that's already priced in.`);
+        else flags.push(`${v.p.name}'s role likely shrinks from week ${shift.fromWeek} when ${shift.by} returns (counted in the numbers).`);
+      }
+    }
+    if (overpay) flags.push("By market value you're giving up a lot more than you get. You could probably land the same upgrade for less.");
+    if (marketRatio != null && marketRatio < 0.75) flags.push("By market value you're getting a lot more than you give. Expect pushback.");
+    if (this.tradeDeadline && this.week > this.tradeDeadline) flags.push("The trade deadline has passed in this league.");
+
     const lineupScore = theirDelta > 5 ? 1 : theirDelta >= -3 ? 0 : theirDelta >= -12 ? -1 : -2;
     const marketScore =
       marketRatio == null ? null : marketRatio >= 1.1 ? 1 : marketRatio >= 0.9 ? 0 : marketRatio >= 0.75 ? -1 : -2;
     const score = marketScore == null ? lineupScore * 2 : lineupScore + marketScore;
     const acceptance = score >= 1 ? "Likely" : score >= 0 ? "Coin flip" : score >= -2 ? "Unlikely" : "Very unlikely";
-    if (marketRatio != null && marketRatio < 0.8) flags.push("By market trade value you are asking for a lot more than you give. Expect pushback.");
-    if (marketRatio != null && marketRatio > 1.25) flags.push("By market trade value you are overpaying. You may be able to ask for more.");
 
     return {
       myDelta,
       theirDelta,
       myNearDelta,
       myPlayoffDelta,
+      perWeekAvg: round1(perWk),
       perWeek,
       verdict,
       acceptance,
+      reasons,
       best: best ? { name: best.p.name, side: bestSide } : null,
       market: hasMarket
         ? { give: Math.round(giveVals.reduce((a, b) => a + b, 0)), get: Math.round(getVals.reduce((a, b) => a + b, 0)), ratio: Math.round(marketRatio! * 100) / 100 }
         : null,
-      myDrops: myTrim.drops,
-      theirDrops: theirTrim.drops,
+      myDrops: myFit.drops,
+      theirDrops: theirFit.drops,
+      myAdds: myFit.adds,
+      rosters: { mine: myAfter, theirs: theirAfter },
       flags,
       give: give.map((id) => this.views.get(id)).filter(Boolean) as PlayerView[],
       get: get.map((id) => this.views.get(id)).filter(Boolean) as PlayerView[],
     };
+  }
+
+
+  /**
+   * Trade finder for one partner. Picks players on their roster who would start for you,
+   * pairs them with 1-2 of your players at a similar market value (so the offer looks fair),
+   * runs every candidate through the full simulator, and keeps deals that help your lineup
+   * without hurting theirs much. Locked players are never offered.
+   */
+  findTradesWith(myId: number, partnerId: number, need: Position | "ANY", locked: string[] = []) {
+    const me = this.team(myId);
+    const them = this.team(partnerId);
+    if (!me || !them) return [];
+    const skill: Position[] = ["QB", "RB", "WR", "TE"];
+    const wantPos = need === "ANY" ? skill : [need];
+    const mv = (id: string) => this.views.get(id)?.market?.value ?? 0;
+    const myIdeal = this.lineup(me.players, (id) => this.views.get(id)?.valuePg ?? 0);
+    const weakest: Record<string, number> = {};
+    for (const f of myIdeal.filled) {
+      if (!f.id) continue;
+      const pos = this.players[f.id]?.pos;
+      if (pos) weakest[pos] = Math.min(weakest[pos] ?? Infinity, f.val);
+    }
+    const targets = them.players
+      .map((id) => this.views.get(id))
+      .filter((v): v is PlayerView => !!v && wantPos.includes(v.p.pos) && mv(v.p.id) > 0)
+      .filter((v) => !(v.p.injury && LONG_TERM.has(v.p.injury) && (this.returnWeek.get(v.p.id) ?? 99) > this.playoffStart))
+      .filter((v) => v.valuePg > (weakest[v.p.pos] ?? 0) * 1.05) // would actually upgrade a starting spot
+      .sort((a, b) => b.valuePg - a.valuePg)
+      .slice(0, 4);
+    if (!targets.length) return [];
+    const mine = me.players.filter((id) => !locked.includes(id) && skill.includes(this.players[id]?.pos as Position) && mv(id) > 0);
+    const packages: string[][] = [];
+    for (let i = 0; i < mine.length; i++) {
+      packages.push([mine[i]]);
+      for (let j = i + 1; j < mine.length; j++) packages.push([mine[i], mine[j]]);
+    }
+    const ideas: {
+      partnerId: number;
+      give: string[];
+      get: string[];
+      result: ReturnType<LeagueModel["evaluateTrade"]>;
+      score: number;
+    }[] = [];
+    for (const t of targets) {
+      const tv = Math.pow(mv(t.p.id), 1.3);
+      const fits = packages
+        .filter((pk) => !pk.includes(t.p.id))
+        .map((pk) => ({ pk, ratio: pk.reduce((a, id) => a + Math.pow(mv(id), 1.3), 0) / tv }))
+        .filter((x) => x.ratio >= 0.85 && x.ratio <= 1.35)
+        .sort((a, b) => Math.abs(a.ratio - 1.05) - Math.abs(b.ratio - 1.05))
+        .slice(0, 6);
+      for (const { pk } of fits) {
+        const r = this.evaluateTrade(myId, partnerId, pk, [t.p.id]);
+        if (r.perWeekAvg < 0.3 || r.theirDelta < -8 || r.acceptance === "Very unlikely" || r.acceptance === "Unlikely") continue;
+        const playoffAvg = r.myPlayoffDelta / Math.max(1, this.lastWeek - this.playoffStart + 1);
+        const score = r.perWeekAvg + 0.5 * playoffAvg + (r.acceptance === "Likely" ? 0.6 : 0) + (r.theirDelta > 0 ? 0.3 : 0);
+        ideas.push({ partnerId, give: pk, get: [t.p.id], result: r, score });
+      }
+    }
+    // One best package per target keeps the list varied.
+    const best = new Map<string, (typeof ideas)[number]>();
+    for (const i of ideas) {
+      const cur = best.get(i.get[0]);
+      if (!cur || i.score > cur.score) best.set(i.get[0], i);
+    }
+    return [...best.values()].sort((a, b) => b.score - a.score);
   }
 
   // ---------- waivers ----------
@@ -710,10 +1048,36 @@ export class LeagueModel {
     for (const v of this.views.values()) {
       if (v.ownerRosterId != null || !v.p.team) continue;
       if (pos && pos !== "ALL" && v.p.pos !== pos) continue;
-      if (v.p.injury && LONG_TERM.has(v.p.injury)) continue;
+      // Injured free agents only make the list if they're due back in time to matter (stash candidates).
+      if (v.p.injury && LONG_TERM.has(v.p.injury)) {
+        const back = this.returnWeek.get(v.p.id);
+        if (back == null || back > this.playoffStart || !v.market) continue;
+      }
       out.push(v);
     }
     return out.sort((a, b) => b.rosPoints + b.trendingAdds / 4000 - (a.rosPoints + a.trendingAdds / 4000));
+  }
+
+
+  /** FAAB bid suggestion: share of your remaining budget scaled by lineup gain, tuned to how this league bids. */
+  faab(myId: number) {
+    const st = this.bundle.league.settings ?? {};
+    if (st.waiver_type !== 2) return null;
+    const budget = st.waiver_budget || 100;
+    const used = this.bundle.rosters.find((r) => r.roster_id === myId)?.settings.waiver_budget_used ?? 0;
+    const remaining = Math.max(0, budget - used);
+    const bids = (this.activity?.transactions ?? []).filter((t) => t.type === "waiver" && (t.bid ?? 0) > 0).map((t) => t.bid!) ;
+    bids.sort((a, b) => a - b);
+    const median = bids.length ? bids[Math.floor(bids.length / 2)] : null;
+    const top = bids.length ? bids[bids.length - 1] : null;
+    // Leagues that bid big need bigger bids to win; scale against a "normal" median of ~5% of budget.
+    const scale = median ? Math.max(0.6, Math.min(1.8, median / (budget * 0.05))) : 1;
+    const suggest = (gain: number) => {
+      if (gain <= 2) return 0;
+      const pct = gain < 6 ? 0.02 : gain < 12 ? 0.06 : gain < 20 ? 0.12 : gain < 35 ? 0.2 : 0.3;
+      return Math.min(remaining, Math.max(1, Math.round(remaining * pct * scale)));
+    };
+    return { budget, remaining, median, top, claims: bids.length, suggest };
   }
 
   /** Points your lineup gains for the rest of the season if you add `addId` and drop `dropId`. */
@@ -751,8 +1115,7 @@ export class LeagueModel {
     if (!opp || !me) return null;
     const mine = this.teamWeekPoints(me.players, week);
     const theirs = this.teamWeekPoints(opp.players, week);
-    const sd = (x: number) => Math.max(15, 0.22 * x);
-    const z = (mine - theirs) / Math.sqrt(sd(mine) ** 2 + sd(theirs) ** 2);
+    const z = (mine - theirs) / Math.sqrt(this.weekSd(me.players, week, mine) ** 2 + this.weekSd(opp.players, week, theirs) ** 2);
     const live = this.activity?.matchups.filter((r) => r.rosterId === rosterId || r.rosterId === opp.rosterId) ?? [];
     return {
       opponent: opp,
@@ -762,6 +1125,144 @@ export class LeagueModel {
       liveMine: live.find((r) => r.rosterId === rosterId)?.points ?? 0,
       liveTheirs: live.find((r) => r.rosterId === opp.rosterId)?.points ?? 0,
     };
+  }
+
+
+  /** Spread of a team's weekly score: learned per-position error summed across the starting lineup. */
+  weekSd(ids: string[], week: number, total?: number): number {
+    const sdPos = this.nfl?.calib?.sd;
+    const t = total ?? this.teamWeekPoints(ids, week);
+    if (!sdPos) return Math.max(15, 0.22 * t);
+    const lu = this.lineup(ids, (id) => this.expected(id, week));
+    const varSum = lu.filled.reduce((a, f) => {
+      if (!f.id) return a;
+      const pos = this.players[f.id]?.pos ?? "WR";
+      const s = sdPos[pos] ?? (pos === "K" ? 4 : pos === "DEF" ? 5.5 : 6.5);
+      return a + s * s;
+    }, 0);
+    return Math.sqrt(varSum) || Math.max(15, 0.22 * t);
+  }
+
+  // ---------- playoff odds ----------
+
+  /**
+   * Simulates the rest of the season thousands of times: every remaining head-to-head game
+   * from Sleeper's schedule, each team's projected lineup (depth, byes and injuries included)
+   * with a realistic spread, then seeds and plays out the bracket. Tiebreak: points for.
+   * `rosters` lets you swap in post-trade rosters to see how a deal moves the odds.
+   */
+  playoffOdds(rosters?: Map<number, string[]>, sims = 4000) {
+    const st = this.bundle.league.settings ?? {};
+    const nPlayoff = Math.max(2, Math.min(this.teams.length, Number(st.playoff_teams) || 6));
+    const schedule = this.activity?.schedule ?? {};
+    const regWeeks = Object.keys(schedule)
+      .map(Number)
+      .filter((w) => w >= this.week && w < this.playoffStart)
+      .sort((a, b) => a - b);
+    const playoffWeeks: number[] = [];
+    for (let w = this.playoffStart; w <= this.lastWeek; w++) playoffWeeks.push(w);
+    const ids = new Map(this.teams.map((t) => [t.rosterId, rosters?.get(t.rosterId) ?? t.players]));
+    const weeks = [...regWeeks, ...playoffWeeks];
+    const mean = new Map<string, number>();
+    const sd = new Map<string, number>();
+    for (const t of this.teams) {
+      for (const w of weeks) {
+        const list = ids.get(t.rosterId)!;
+        const m = this.teamWeekPoints(list, w);
+        mean.set(`${t.rosterId}:${w}`, m);
+        sd.set(`${t.rosterId}:${w}`, this.weekSd(list, w, m));
+      }
+    }
+    // Seeded random numbers so results don't jump around between refreshes.
+    let seed = 1234567;
+    const rand = () => {
+      seed |= 0;
+      seed = (seed + 0x6d2b79f5) | 0;
+      let x = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
+      return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+    };
+    const normal = () => {
+      const u = Math.max(1e-9, rand());
+      return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rand());
+    };
+    const score = (r: number, w: number) => Math.max(0, (mean.get(`${r}:${w}`) ?? 0) + normal() * (sd.get(`${r}:${w}`) ?? 20));
+
+    const tally = new Map(this.teams.map((t) => [t.rosterId, { wins: 0, playoffs: 0, bye: 0, title: 0, seed1: 0 }]));
+    const slots = 2 ** Math.ceil(Math.log2(nPlayoff));
+    const byes = slots - nPlayoff;
+    for (let s = 0; s < sims; s++) {
+      const rec = new Map(this.teams.map((t) => [t.rosterId, { w: t.wins + t.ties / 2, pf: t.pf }]));
+      for (const w of regWeeks) {
+        for (const [a, b] of schedule[String(w)] ?? []) {
+          const sa = score(a, w);
+          const sb = score(b, w);
+          const ra = rec.get(a);
+          const rb = rec.get(b);
+          if (!ra || !rb) continue;
+          ra.pf += sa;
+          rb.pf += sb;
+          if (sa > sb) ra.w += 1;
+          else rb.w += 1;
+        }
+      }
+      const order = [...rec.entries()].sort((x, y) => y[1].w - x[1].w || y[1].pf - x[1].pf).map((x) => x[0]);
+      order.forEach((r, i) => {
+        const t = tally.get(r)!;
+        t.wins += rec.get(r)!.w;
+        if (i === 0) t.seed1++;
+        if (i < nPlayoff) t.playoffs++;
+        if (i < byes) t.bye++;
+      });
+      // Bracket: byes sit out round 1; each round the best seed left plays the worst.
+      let alive = order.slice(0, nPlayoff);
+      let resting = alive.slice(0, byes);
+      let playing = alive.slice(byes);
+      let wi = 0;
+      while (resting.length + playing.length > 1) {
+        const w = playoffWeeks[Math.min(wi, playoffWeeks.length - 1)] ?? this.lastWeek;
+        const winners: number[] = [];
+        const seeds = playing.slice().sort((a, b) => order.indexOf(a) - order.indexOf(b));
+        while (seeds.length > 1) {
+          const hi = seeds.shift()!;
+          const lo = seeds.pop()!;
+          winners.push(score(hi, w) >= score(lo, w) ? hi : lo);
+        }
+        if (seeds.length) winners.push(seeds[0]);
+        alive = [...resting, ...winners];
+        resting = [];
+        playing = alive;
+        wi++;
+      }
+      if (alive[0] != null) tally.get(alive[0])!.title++;
+    }
+    return this.teams.map((t) => {
+      const x = tally.get(t.rosterId)!;
+      return {
+        rosterId: t.rosterId,
+        projWins: Math.round((x.wins / sims) * 10) / 10,
+        playoffPct: Math.round((100 * x.playoffs) / sims),
+        byePct: byes ? Math.round((100 * x.bye) / sims) : null,
+        titlePct: Math.round((100 * x.title) / sims),
+        seed1Pct: Math.round((100 * x.seed1) / sims),
+      };
+    });
+  }
+
+  /** How a trade moves your playoff and title odds (same random draws before and after). */
+  tradePlayoffImpact(myId: number, partnerId: number, give: string[], get: string[]) {
+    if (!this.activity?.schedule) return null;
+    const r = this.evaluateTrade(myId, partnerId, give, get);
+    const before = this.playoffOdds(undefined, 3000).find((x) => x.rosterId === myId);
+    const after = this.playoffOdds(
+      new Map([
+        [myId, r.rosters.mine],
+        [partnerId, r.rosters.theirs],
+      ]),
+      3000
+    ).find((x) => x.rosterId === myId);
+    if (!before || !after) return null;
+    return { before, after };
   }
 
   // ---------- league activity ----------
@@ -871,6 +1372,178 @@ export class LeagueModel {
     };
   }
 
+
+  // ---------- compare ----------
+
+  /** Projection with a realistic range: 10th to 90th percentile outcomes (learned error size per position). */
+  range(id: string, week = this.week) {
+    const v = this.views.get(id);
+    const exp = this.expected(id, week);
+    const pos = v?.p.pos ?? "WR";
+    const sdBase = this.nfl?.calib?.sd?.[pos] ?? ({ QB: 8, RB: 7, WR: 7, TE: 5.5, K: 4, DEF: 5.5 } as Record<string, number>)[pos] ?? 7;
+    const typical = ({ QB: 18, RB: 12, WR: 12, TE: 9, K: 8, DEF: 7 } as Record<string, number>)[pos] ?? 12;
+    const sd = exp > 0 ? sdBase * Math.max(0.6, Math.min(1.3, Math.sqrt(exp / typical))) : 0;
+    return { exp: round1(exp), floor: round1(Math.max(0, exp - 1.28 * sd)), ceiling: round1(exp + 1.28 * sd), sd: round1(sd) };
+  }
+
+  /** Side-by-side start/sit call, with a tiebreak that depends on whether you're favored this week. */
+  compare(myId: number, ids: string[], week = this.week) {
+    const rows = ids
+      .map((id) => this.views.get(id))
+      .filter((v): v is PlayerView => !!v)
+      .map((v) => {
+        const g = this.gameFor(v.p.team, week);
+        const d = g ? this.dvp.get(g.opp)?.get(v.p.pos) : undefined;
+        return {
+          v,
+          g,
+          range: this.range(v.p.id, week),
+          dvpRank: d?.rank ?? null,
+          defOut: g && week === this.week ? this.unitOut(g.opp, "def") : [],
+          olOut: g && week === this.week ? this.unitOut(v.p.team, "ol") : [],
+        };
+      });
+    if (rows.length < 2) return { rows, pick: null as string | null, why: "" };
+    const h2h = week === this.week ? this.headToHead(myId, week) : null;
+    const byExp = rows.slice().sort((a, b) => b.range.exp - a.range.exp);
+    const [a, b] = byExp;
+    const gap = a.range.exp - b.range.exp;
+    const avgSd = (a.range.sd + b.range.sd) / 2 || 1;
+    let pick = a;
+    let why = `${a.v.p.name} projects ${gap.toFixed(1)} pts higher.`;
+    if (gap < 0.3 * avgSd) {
+      if (h2h && h2h.winProb < 45) {
+        pick = rows.slice().sort((x, y) => y.range.ceiling - x.range.ceiling)[0];
+        why = `Basically a coin flip. You're the underdog this week (${h2h.winProb}% to win), so take the higher ceiling: ${pick.v.p.name}.`;
+      } else if (h2h && h2h.winProb > 60) {
+        pick = rows.slice().sort((x, y) => y.range.floor - x.range.floor)[0];
+        why = `Basically a coin flip. You're favored (${h2h.winProb}% to win), so take the safer floor: ${pick.v.p.name}.`;
+      } else {
+        why = `Basically a coin flip (${gap.toFixed(1)} pts apart). ${a.v.p.name} has the slight edge; check late news.`;
+      }
+    }
+    return { rows, pick: pick.v.p.id, why };
+  }
+
+
+  // ---------- weekly to-do ----------
+
+  /** The few things worth doing this week, most urgent first. */
+  actionItems(myId: number) {
+    type Item = { kind: string; text: string; tab?: "lineup" | "waivers" | "trades"; playerId?: string; tone: "rose" | "amber" | "lime" | "cyan" };
+    const items: Item[] = [];
+    const me = this.team(myId);
+    if (!me) return items;
+    const name = (id: string) => this.views.get(id)?.p.name ?? id;
+    const ss = this.startSit(myId);
+    const optimal = ss.lineup.filled.map((f) => f.id).filter((x): x is string => !!x);
+
+    // 1) Your saved Sleeper lineup vs the best lineup.
+    const actual = (this.bundle.rosters.find((r) => r.roster_id === myId)?.starters ?? []).filter((id) => id && id !== "0");
+    if (actual.length) {
+      const dead = new Map<string, string>(); // starters who can't score: id -> reason
+      for (const id of actual) {
+        const v = this.views.get(id);
+        if (!v) continue;
+        const g = this.gameFor(v.p.team, this.week);
+        if (!g) dead.set(id, "on bye");
+        else if (v.p.injury === "Out" || (v.p.injury && LONG_TERM.has(v.p.injury))) dead.set(id, `ruled out (${v.p.injury})`);
+      }
+      const benchedStarters = optimal.filter((id) => !actual.includes(id));
+      const sittingIn = actual.filter((id) => !optimal.includes(id));
+      for (const inId of benchedStarters) {
+        const pos = this.players[inId]?.pos;
+        const swap = sittingIn
+          .filter((o) => this.players[o]?.pos === pos || (["RB", "WR", "TE"].includes(pos ?? "") && ["RB", "WR", "TE"].includes(this.players[o]?.pos ?? "")))
+          .sort((a, b) => this.expected(a, this.week) - this.expected(b, this.week))[0];
+        if (!swap) continue;
+        const gain = this.expected(inId, this.week) - this.expected(swap, this.week);
+        if (gain >= 1) {
+          const why = dead.get(swap);
+          items.push({
+            kind: "lineup",
+            text: why
+              ? `${name(swap)} is in your Sleeper lineup but ${why}. Start ${name(inId)} instead (+${gain.toFixed(1)}).`
+              : `Start ${name(inId)} over ${name(swap)} (+${gain.toFixed(1)} projected).`,
+            tab: "lineup",
+            tone: why ? "rose" : "amber",
+          });
+          dead.delete(swap);
+          sittingIn.splice(sittingIn.indexOf(swap), 1);
+        }
+      }
+      for (const [id, why] of dead)
+        items.unshift({ kind: "lineup", text: `${name(id)} is in your Sleeper lineup but ${why}, and you have no good replacement. Check waivers.`, tab: "waivers", tone: "rose" });
+      items.sort((a, b) => (a.tone === "rose" ? 0 : 1) - (b.tone === "rose" ? 0 : 1));
+    }
+    // 2) Lineup-lock and injury alerts.
+    for (const w of ss.warnings.slice(0, 2)) items.push({ kind: "alert", text: w, tab: "lineup", tone: "amber" });
+
+    // 3) Best waiver move.
+    const drop = this.dropCandidates(myId)[0];
+    if (drop) {
+      const best = this.freeAgents("ALL")
+        .slice(0, 15)
+        .map((v) => ({ v, gain: this.waiverGain(myId, v.p.id, drop.p.id) }))
+        .sort((a, b) => b.gain - a.gain)[0];
+      if (best && best.gain >= 3)
+        items.push({
+          kind: "waiver",
+          text: `Add ${best.v.p.name}, drop ${drop.p.name} (+${best.gain.toFixed(0)} pts rest of season).`,
+          tab: "waivers",
+          playerId: best.v.p.id,
+          tone: "lime",
+        });
+    }
+    // 4) Bye-week or injury holes coming up.
+    const core = this.lineup(me.players, (id) => this.views.get(id)?.valuePg ?? 0).filled;
+    for (let w = this.week + 1; w <= Math.min(this.lastWeek, this.week + 3); w++) {
+      const lu = this.lineup(me.players, (id) => this.expected(id, w));
+      const weak = lu.filled.filter((f, i) => (core[i]?.val ?? 0) >= 1 && (!f.id || f.val < 1)).map((f) => f.slot.replace("_", " "));
+      if (weak.length) {
+        items.push({ kind: "bye", text: `Week ${w}: no real starter at ${weak.join(", ")}. Plan a pickup or trade now.`, tab: "waivers", tone: "amber" });
+        break;
+      }
+    }
+    // 5) Roles about to shrink on your roster.
+    for (const id of me.players) {
+      const sh = this.roleShift.get(id);
+      if (sh && sh.fromWeek <= this.week + 4)
+        items.push({ kind: "role", text: `${name(id)}'s role likely shrinks from week ${sh.fromWeek} when ${sh.by} returns. Sell or plan around it.`, tab: "trades", playerId: id, tone: "amber" });
+    }
+    // 6) Sell high / buy low from expected points.
+    const luck = (v: PlayerView) => (v.adv?.s?.fp != null && v.adv.s.xfp != null && v.games >= 3 ? v.adv.s.fp - v.adv.s.xfp : 0);
+    const sellHigh = me.players.map((id) => this.views.get(id)!).filter((v) => v && luck(v) >= 4).sort((a, b) => luck(b) - luck(a))[0];
+    if (sellHigh)
+      items.push({
+        kind: "sell",
+        text: `Sell-high window: ${sellHigh.p.name} is scoring ${luck(sellHigh).toFixed(1)} pts/game above his expected points.`,
+        tab: "trades",
+        playerId: sellHigh.p.id,
+        tone: "cyan",
+      });
+    const needs = this.needsTable().find((n) => n.team.rosterId === myId)?.needs ?? [];
+    const buyLow = [...this.views.values()]
+      .filter((v) => v.ownerRosterId != null && v.ownerRosterId !== myId && needs.includes(v.p.pos) && v.market && luck(v) <= -3.5)
+      .sort((a, b) => luck(a) - luck(b))[0];
+    if (buyLow)
+      items.push({
+        kind: "buy",
+        text: `Buy-low target: ${buyLow.p.name} (${this.ownerName(buyLow.p.id)}) is scoring ${Math.abs(luck(buyLow)).toFixed(1)} below his expected points. The opportunity is there.`,
+        tab: "trades",
+        playerId: buyLow.p.id,
+        tone: "cyan",
+      });
+    // 7) Your injured players coming back soon.
+    for (const id of [...me.players, ...me.reserve]) {
+      const back = this.returnWeek.get(id);
+      const v = this.views.get(id);
+      if (back != null && v?.p.injury && LONG_TERM.has(v.p.injury) && back <= this.week + 2)
+        items.push({ kind: "return", text: `${v.p.name} is expected back week ${back}. Keep a roster spot ready.`, playerId: id, tone: "lime" });
+    }
+    return items.slice(0, 7);
+  }
+
   // ---------- start / sit ----------
 
   startSit(myId: number, week = this.week) {
@@ -916,6 +1589,10 @@ export class LeagueModel {
     }
     return { lineup: lu, rows, warnings };
   }
+}
+
+function fmtSigned(n: number) {
+  return `${n > 0 ? "+" : ""}${n.toFixed(1)}`;
 }
 
 /** Standard normal CDF (Abramowitz-Stegun approximation). */

@@ -130,7 +130,7 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
 
   const luck = a?.s?.fp != null && a.s.xfp != null ? a.s.fp - a.s.xfp : null;
   const weeks = model.remainingWeeks().slice(0, 6);
-  const maxPts = Math.max(1, ...(a?.wk ?? []).map((w) => Math.max(w[6] ?? 0, w[5] ?? 0)));
+  const maxPts = Math.max(1, ...(a?.wk ?? []).slice(-8).map((w) => Math.max(w[6] ?? 0, w[5] ?? 0)));
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/60 backdrop-blur-[2px]" onClick={onClose}>
@@ -201,9 +201,22 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
         </div>
 
         {/* Health */}
-        {(v.p.injury || pr || v.espn) && (
-          <Section title="Health">
+        {(v.p.injury || pr || v.espn || model.roleShift.get(v.p.id)) && (
+          <Section title="Health and role">
             <div className="space-y-1.5 text-sm">
+              {model.returnWeek.get(v.p.id) != null && (
+                <div className="text-amber-200">
+                  Expected back:{" "}
+                  {model.returnWeek.get(v.p.id)! > 18 ? "not this season" : `Week ${model.returnWeek.get(v.p.id)}`}
+                  {v.espn?.returnDate ? "" : " (estimate)"}
+                </div>
+              )}
+              {model.roleShift.get(v.p.id) && (
+                <div className="text-rose-300">
+                  Role likely shrinks from Week {model.roleShift.get(v.p.id)!.fromWeek} when {model.roleShift.get(v.p.id)!.by} returns. His
+                  projections are lowered from then.
+                </div>
+              )}
               {pr && (
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-slate-400">Week {pr.w} practice</span>
@@ -258,28 +271,38 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
               </p>
             )}
 
-            {/* Weekly bars: PPR points with xFP marker */}
+            {/* Weekly bars: PPR points (number on top) with the expected-points line. Numbers are always visible, no hover needed. */}
             {a.wk.length > 0 && (
               <div className="mt-4">
-                <div className="mb-1 flex justify-between text-[10px] uppercase tracking-wider text-slate-500">
-                  <span>Weekly PPR pts</span>
+                <div className="mb-2 flex justify-between text-[10px] uppercase tracking-wider text-slate-500">
+                  <span>{a.wk.length > 8 ? "Last 8 games" : "Week by week"}</span>
                   <span>
-                    <span className="text-fuchsia-300">━</span> expected
+                    <span className="text-cyan-300">■</span> PPR pts <span className="ml-2 text-fuchsia-300">━</span> expected
                   </span>
                 </div>
-                <div className="flex h-24 items-end gap-1.5">
-                  {a.wk.map(([w, snap, , , , xfp, fp]) => (
-                    <div key={w} className="flex h-full flex-1 flex-col items-center gap-1" title={`Week ${w}: ${n1(fp)} pts, xFP ${n1(xfp)}, snaps ${pct(snap)}`}>
-                      <div className="relative flex w-full flex-1 items-end">
+                <div className="flex gap-1.5">
+                  <div className="flex w-9 shrink-0 flex-col justify-end text-[9px] uppercase tracking-wider text-slate-500">
+                    <span className="flex h-6 items-end pb-0.5">Pts</span>
+                    <span className="h-20" />
+                    <span className="mt-1 h-3.5 leading-[14px]">Wk</span>
+                    <span className="h-3.5 leading-[14px] text-fuchsia-300/80">xFP</span>
+                    <span className="h-3.5 leading-[14px]">Snap</span>
+                  </div>
+                  {a.wk.slice(-8).map(([w, snap, , , , xfp, fp]) => (
+                    <div key={w} className="flex min-w-0 flex-1 flex-col items-center">
+                      <span className="flex h-6 items-end pb-0.5 font-mono text-[11px] font-semibold text-slate-100">{fp != null ? fp.toFixed(1) : "-"}</span>
+                      <div className="relative flex h-20 w-full items-end">
                         <div className="w-full rounded-t bg-cyan-400/60" style={{ height: `${((fp ?? 0) / maxPts) * 100}%` }} />
-                        {xfp != null && <div className="absolute inset-x-0 h-0.5 bg-fuchsia-400 shadow-[0_0_6px_#e879f9]" style={{ bottom: `${(xfp / maxPts) * 100}%` }} />}
+                        {xfp != null && (
+                          <div className="absolute inset-x-0 h-0.5 bg-fuchsia-400 shadow-[0_0_6px_#e879f9]" style={{ bottom: `${(xfp / maxPts) * 100}%` }} />
+                        )}
                       </div>
-                      <span className="font-mono text-[10px] text-slate-500">{w}</span>
-                      <span className="font-mono text-[9px] text-slate-600">{snap != null ? Math.round(snap * 100) : "-"}</span>
+                      <span className="mt-1 h-3.5 font-mono text-[10px] leading-[14px] text-slate-400">{w}</span>
+                      <span className="h-3.5 font-mono text-[10px] leading-[14px] text-fuchsia-300/90">{xfp != null ? xfp.toFixed(1) : "-"}</span>
+                      <span className="h-3.5 font-mono text-[10px] leading-[14px] text-slate-500">{snap != null ? `${Math.round(snap * 100)}%` : "-"}</span>
                     </div>
                   ))}
                 </div>
-                <div className="mt-0.5 text-right text-[9px] text-slate-600">bottom row: snap %</div>
               </div>
             )}
 

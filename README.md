@@ -4,6 +4,13 @@ An open-source AI fantasy football agent for **Sleeper** leagues, with a dark ne
 
 Sync any Sleeper league and get:
 
+- **Weekly to-do** – the few things worth doing this week: lineup fixes compared to your saved Sleeper lineup, lineup-lock alerts, the best waiver move, bye holes coming up, roles about to shrink, sell-high and buy-low names.
+- **Trade finder** – pick a need (or "any upgrade") and it scans every team for fair deals that help your lineup and pass the market-value check, each fully simulated. Lock players you'll never trade.
+- **Start/Sit compare** – 2-3 players side by side with floor-to-ceiling ranges, matchup, Vegas, injuries on both lines, weather, and a call that leans safe when you're favored and swings big when you're the underdog.
+- **Streamers and FAAB** – one-week QB/TE/K/DEF pickups by matchup, and suggested FAAB bids tuned to how your league bids.
+- **Player search** – find anyone from the header and open his card.
+- **Playoff odds** – simulates the rest of the season thousands of times on your league's real schedule, then the bracket: every team's chance to make the playoffs, get a bye and win the title. The trade simulator shows how a deal moves your odds.
+- **Saved AI chats** – conversations stay after a refresh (stored in your browser only).
 - **Command dashboard** – this week's head-to-head with win odds, a live league wire of every add, drop and trade, your roster with usage (snap %, target share, carry share), next matchup, value over replacement, rest-of-season points, a week-by-week outlook to the championship, standings, and every team's needs.
 - **Trade simulator** – shows each manager's trading habits (how often they trade, what they buy and sell), then plays out a trade week by week through your fantasy playoffs. Shows how many points your *actual best lineup* gains or loses (byes, injuries, forced drops included), the best player in the deal, and how likely the other manager is to accept.
 - **Waiver radar** – free agents ranked by how many points they add to your lineup if you drop your weakest bench player, plus usage and trending adds.
@@ -73,6 +80,19 @@ In **Settings**, click **Load models** to pick from the models your key can use.
 - **Team environment**: pass rate over expected and neutral pass rate (1st/2nd down, win probability 20-80%, outside the last 2 minutes of a half), seconds per play in neutral situations, red zone trips, the QB's share of carries inside the 5, and EPA per play allowed on defense. League-average PROE is about -2%.
 
 These are models, not crystal balls. They lag breaking news, which is why the agent checks the web.
+
+## It gets better every week
+
+When a new NFL week finishes, the nightly job (`scripts/calibrate.py`) replays last season and this season player by player: what did Sleeper and ESPN project, what was his season average, last 3 games and expected points from usage, and what did he actually score? It then refits:
+
+- how much to trust each input, by position (projections vs recent form vs season average vs expected points)
+- how to weigh Sleeper against ESPN projections
+- how big a typical miss is at each position, which drives the win probability
+- how often starters at each position miss the next game, which drives depth value in trades
+- how much Vegas implied team totals and defense-vs-position should move each position's projection
+- how much FantasyCalc market value should count (the job saves a market snapshot before every week, so this one starts learning after a few weeks of snapshots and keeps improving)
+
+It also tests itself honestly (trained on last season, scored on this season's games) and shows War Room's average miss next to Sleeper's and ESPN's in **Settings → Data sources**.
 
 ## Data sources (all free)
 

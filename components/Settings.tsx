@@ -196,6 +196,20 @@ export default function Settings({ onClose }: { onClose: () => void }) {
               <li>Trade market values: FantasyCalc (every 6 hours){model && !hasValues(model) ? " (not loaded)" : ""}</li>
               <li>Schedule, Vegas lines: ESPN · Weather: Open-Meteo · News: ESPN / Rotowire</li>
             </ul>
+            {nfl?.calib && (
+              <p className="mt-2 text-slate-300">
+                Self-tuning: weights learned from {nfl.calib.n.toLocaleString()} player-games through week {nfl.calib.throughWeek}, refit every time a
+                week finishes.
+                {nfl.calib.accuracy?.warRoom != null && (
+                  <>
+                    {" "}
+                    Average miss per player this season: War Room {nfl.calib.accuracy.warRoom} pts
+                    {nfl.calib.accuracy.sleeper != null ? `, Sleeper ${nfl.calib.accuracy.sleeper}` : ""}
+                    {nfl.calib.accuracy.espn != null ? `, ESPN ${nfl.calib.accuracy.espn}` : ""} (tested on games it hadn&apos;t seen).
+                  </>
+                )}
+              </p>
+            )}
             <p className="mt-2">Data: nflverse (CC-BY 4.0), FTN Data via nflverse (CC-BY-SA 4.0), ffopportunity, DynastyProcess.</p>
           </details>
         </div>

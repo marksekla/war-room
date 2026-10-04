@@ -123,6 +123,8 @@ export default function StartSit({ model, myId }: { model: LeagueModel; myId: nu
         </span>
       </div>
 
+      <Compare model={model} myId={myId} week={week} wx={wx} />
+
       {alerts.length > 0 && (
         <div className="panel border-amber-400/30 p-4">
           <div className="hud-title !text-amber-300">Lineup alerts</div>
@@ -185,5 +187,151 @@ export default function StartSit({ model, myId }: { model: LeagueModel; myId: nu
         Expected points blend projections, recent usage, expected points from opportunity and matchup, and zero out byes and players ruled out. DNP/LP chips are this week&apos;s practice report. -2D means two of the opponent&apos;s defensive starters are out; OL-2 means two of his own linemen are out (hover or tap a player for names). ≋ ☂ ❄ mark wind, rain/snow or cold at kickoff. Check final news before lock; the AI agent can do that for you.
       </p>
     </div>
+  );
+}
+
+function Compare({ model, myId, week, wx }: { model: LeagueModel; myId: number; week: number; wx: Record<string, Weather> }) {
+  const [open, setOpen] = useState(false);
+  const [ids, setIds] = useState<string[]>([]);
+  const me = model.team(myId)!;
+  const roster = me.players
+    .map((id) => model.view(id))
+    .filter((v): v is NonNullable<typeof v> => !!v)
+    .sort((a, b) => ["QB", "RB", "WR", "TE", "K", "DEF"].indexOf(a.p.pos) - ["QB", "RB", "WR", "TE", "K", "DEF"].indexOf(b.p.pos));
+  const r = useMemo(() => (ids.length >= 2 ? model.compare(myId, ids, week) : null), [model, myId, ids, week]);
+  const toggle = (id: string) => setIds((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : cur.length >= 3 ? [...cur.slice(1), id] : [...cur, id]));
+
+  if (!open)
+    return (
+      <button className="btn btn-ghost" onClick={() => setOpen(true)}>
+        ⇆ Compare players
+      </button>
+    );
+
+  const cell = "px-2 py-1.5 text-center align-top";
+  return (
+    <Panel
+      title={`Compare · week ${week}`}
+      right={
+        <button className="text-xs text-slate-400 hover:text-slate-100" onClick={() => setOpen(false)}>
+          Close
+        </button>
+      }
+    >
+      <div className="flex flex-wrap gap-1.5">
+        {roster.map((v) => (
+          <button
+            key={v.p.id}
+            onClick={() => toggle(v.p.id)}
+            className={`rounded-full border px-2.5 py-1 text-xs ${ids.includes(v.p.id) ? "border-cyan-300/70 bg-cyan-400/15 text-cyan-100" : "border-white/10 text-slate-400 hover:text-slate-100"}`}
+          >
+            <span className="mr-1 font-mono text-[10px] text-slate-500">{v.p.pos}</span>
+            {v.p.name}
+          </button>
+        ))}
+      </div>
+      {!r && <p className="mt-3 text-xs text-slate-500">Pick 2 or 3 players.</p>}
+      {r && (
+        <>
+          <div className="-mx-4 mt-4 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr>
+                  <th className="w-24 px-2" />
+                  {r.rows.map((x) => (
+                    <th key={x.v.p.id} className={`${cell} font-display text-xs ${r.pick === x.v.p.id ? "text-lime-300" : "text-slate-200"}`}>
+                      {x.v.p.name}
+                      {r.pick === x.v.p.id && <div className="text-[10px] tracking-widest text-lime-300">START</div>}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="[&_td]:border-t [&_td]:border-white/5">
+                <tr>
+                  <td className="px-2 py-1.5 text-xs text-slate-500">Projection</td>
+                  {r.rows.map((x) => (
+                    <td key={x.v.p.id} className={`${cell} font-mono text-base font-semibold neon-text`}>
+                      {x.range.exp.toFixed(1)}
+                    </td>
+                  ))}
+                </tr>
+                <tr>
+                  <td className="px-2 py-1.5 text-xs text-slate-500">Floor to ceiling</td>
+                  {r.rows.map((x) => (
+                    <td key={x.v.p.id} className={`${cell} font-mono text-xs text-slate-300`}>
+                      {x.range.floor.toFixed(0)} to {x.range.ceiling.toFixed(0)}
+                    </td>
+                  ))}
+                </tr>
+                <tr>
+                  <td className="px-2 py-1.5 text-xs text-slate-500">Matchup</td>
+                  {r.rows.map((x) => (
+                    <td key={x.v.p.id} className={`${cell} font-mono text-xs`}>
+                      {x.g ? (
+                        <span className="inline-flex items-center gap-1">
+                          {x.g.home ? "vs" : "@"} {x.g.opp} <RankChip rank={x.dvpRank} />
+                        </span>
+                      ) : (
+                        <span className="text-amber-300">BYE</span>
+                      )}
+                    </td>
+                  ))}
+                </tr>
+                <tr>
+                  <td className="px-2 py-1.5 text-xs text-slate-500">Team total (Vegas)</td>
+                  {r.rows.map((x) => (
+                    <td key={x.v.p.id} className={`${cell} font-mono text-xs`}>
+                      {x.g?.impliedTotal != null ? x.g.impliedTotal.toFixed(1) : "-"}
+                    </td>
+                  ))}
+                </tr>
+                <tr>
+                  <td className="px-2 py-1.5 text-xs text-slate-500">Injuries that matter</td>
+                  {r.rows.map((x) => (
+                    <td key={x.v.p.id} className={`${cell} text-[11px] leading-snug`}>
+                      {x.defOut.length > 0 && <div className="text-lime-300">{x.g?.opp} D missing {x.defOut.length}</div>}
+                      {x.olOut.length > 0 && <div className="text-rose-300">Own OL missing {x.olOut.length}</div>}
+                      {!x.defOut.length && !x.olOut.length && <span className="text-slate-600">-</span>}
+                    </td>
+                  ))}
+                </tr>
+                <tr>
+                  <td className="px-2 py-1.5 text-xs text-slate-500">Status</td>
+                  {r.rows.map((x) => {
+                    const pr = x.v.adv?.prac;
+                    return (
+                      <td key={x.v.p.id} className={`${cell} text-[11px]`}>
+                        {x.v.p.injury ? <span className="text-amber-300">{x.v.p.injury}</span> : <span className="text-slate-400">Healthy</span>}
+                        {pr && pr.w === week && pr.st && pr.st !== "FP" && <div className="text-slate-500">{pr.st} in practice</div>}
+                      </td>
+                    );
+                  })}
+                </tr>
+                <tr>
+                  <td className="px-2 py-1.5 text-xs text-slate-500">Weather</td>
+                  {r.rows.map((x) => {
+                    const n = weatherNote(wx[x.v.p.team ?? ""]);
+                    return (
+                      <td key={x.v.p.id} className={`${cell} text-[11px] ${n?.severe ? "text-amber-300" : "text-slate-400"}`}>
+                        {n?.label ?? "-"}
+                      </td>
+                    );
+                  })}
+                </tr>
+                <tr>
+                  <td className="px-2 py-1.5 text-xs text-slate-500">Kickoff</td>
+                  {r.rows.map((x) => (
+                    <td key={x.v.p.id} className={`${cell} font-mono text-[11px] text-slate-400`}>
+                      {x.g ? fmtKick(x.g.game.kickoff) : "-"}
+                    </td>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-sm text-slate-200">{r.why}</p>
+        </>
+      )}
+    </Panel>
   );
 }
