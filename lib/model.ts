@@ -751,7 +751,15 @@ export class LeagueModel {
   teamProfile(rosterId: number) {
     const t = this.team(rosterId)!;
     const ids = [...t.players];
-    const lu = this.lineup(ids, (id) => this.views.get(id)?.valuePg ?? 0);
+    // Rest-of-season strength: a player's per-game value, scaled by the share of remaining weeks
+    // he's expected to be available (so a star out until week 14 doesn't count as a full starter).
+    const weeks = this.remainingWeeks();
+    const share = (id: string) => {
+      const back = this.returnWeek.get(id);
+      if (back == null || !weeks.length) return 1;
+      return Math.max(0, weeks.filter((w) => w >= back).length) / weeks.length;
+    };
+    const lu = this.lineup(ids, (id) => (this.views.get(id)?.valuePg ?? 0) * share(id));
     const byPos: Record<string, number> = {};
     for (const f of lu.filled) {
       if (!f.id) continue;
@@ -1186,12 +1194,19 @@ export class LeagueModel {
       const u = Math.max(1e-9, rand());
       return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rand());
     };
-    const score = (r: number, w: number) => Math.max(0, (mean.get(`${r}:${w}`) ?? 0) + normal() * (sd.get(`${r}:${w}`) ?? 20));
+    // Each simulated season also draws how good every team really is (projections can be off by
+    // several percent for a whole season), not just week-to-week noise. Without this, odds come
+    // out overconfident. The uncertainty shrinks as fewer games remain.
+    const strengthSd = 0.08 * Math.sqrt(Math.max(1, regWeeks.length + playoffWeeks.length) / 17);
+    let strength = new Map<number, number>();
+    const score = (r: number, w: number) =>
+      Math.max(0, (mean.get(`${r}:${w}`) ?? 0) * (strength.get(r) ?? 1) + normal() * (sd.get(`${r}:${w}`) ?? 20));
 
     const tally = new Map(this.teams.map((t) => [t.rosterId, { wins: 0, playoffs: 0, bye: 0, title: 0, seed1: 0 }]));
     const slots = 2 ** Math.ceil(Math.log2(nPlayoff));
     const byes = slots - nPlayoff;
     for (let s = 0; s < sims; s++) {
+      strength = new Map(this.teams.map((t) => [t.rosterId, Math.max(0.7, 1 + normal() * strengthSd)]));
       const rec = new Map(this.teams.map((t) => [t.rosterId, { w: t.wins + t.ties / 2, pf: t.pf }]));
       for (const w of regWeeks) {
         for (const [a, b] of schedule[String(w)] ?? []) {
