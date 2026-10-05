@@ -42,7 +42,7 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     defaultModel: "",
     keyHint: "AIza...",
     keyUrl: "https://aistudio.google.com/apikey",
-    note: "Free key from Google AI Studio, no card needed. Free use has daily limits; if you hit one, wait or pick another model.",
+    note: "Free key from Google AI Studio, no card needed. Free use has daily limits; if you hit one, wait or pick another model. Google Search needs a paid key, so free keys rely on the app's own news feed.",
   },
   compat: {
     label: "Other",
@@ -362,10 +362,10 @@ async function runGemini(s: AiSettings, system: string, history: ChatMessage[], 
     const j = await res.json().catch(() => ({}));
     if (!res.ok) {
       const msg: string = j?.error?.message || `Gemini error ${res.status}`;
-      if (useSearch && res.status === 400) {
-        // Older models can't mix Google Search with our tools: keep the tools.
+      if (useSearch && ([400, 403, 429].includes(res.status) || /search|ground/i.test(msg))) {
+        // Free-tier keys don't get Google Search, and older models can't mix it with our tools: keep the tools.
         useSearch = false;
-        steps.push("Google Search can't be combined with tools on this model, continuing without it");
+        steps.push("Google Search isn't available on this key or model, continuing without it");
         onStep(steps[steps.length - 1]);
         round--;
         continue;
