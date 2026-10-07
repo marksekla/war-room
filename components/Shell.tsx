@@ -9,20 +9,22 @@ import Waivers from "./Waivers";
 import StartSit from "./StartSit";
 import Trades from "./Trades";
 import Availability from "./Availability";
+import DepthCharts from "./DepthCharts";
 import Chat from "./Chat";
 import { PlayerDrawerProvider } from "./PlayerDrawer";
 import PlayerSearch from "./PlayerSearch";
 import { Spinner } from "./ui";
 
-export type Tab = "dashboard" | "waivers" | "lineup" | "trades" | "agent" | "health";
+export type Tab = "dashboard" | "waivers" | "lineup" | "trades" | "agent" | "health" | "depth";
 
 const NAV: { id: Tab; label: string; short: string; icon: string }[] = [
-  { id: "dashboard", label: "Command", short: "Command", icon: "◈" },
-  { id: "agent", label: "AI Agent", short: "AI Agent", icon: "✦" },
+  { id: "dashboard", label: "Command", short: "Home", icon: "◈" },
+  { id: "agent", label: "AI Agent", short: "AI", icon: "✦" },
   { id: "trades", label: "Trades", short: "Trades", icon: "⇄" },
   { id: "waivers", label: "Waivers", short: "Waivers", icon: "⊕" },
   { id: "lineup", label: "Start / Sit", short: "Start/Sit", icon: "▤" },
   { id: "health", label: "Are they playing", short: "Playing?", icon: "✚" },
+  { id: "depth", label: "Depth charts", short: "Depth", icon: "☷" },
 ];
 
 export default function Shell() {
@@ -160,7 +162,7 @@ export default function Shell() {
           </header>
 
           {/* Mobile bottom tab bar */}
-          <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-6 border-t border-cyan-400/15 bg-[#070912]/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
+          <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-7 border-t border-cyan-400/15 bg-[#070912]/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
             {NAV.map((n) => (
               <button
                 key={n.id}
@@ -168,7 +170,7 @@ export default function Shell() {
                 className={`flex flex-col items-center gap-0.5 py-2.5 ${tab === n.id ? "text-cyan-200" : "text-slate-500"}`}
               >
                 <span className={`text-xl leading-none ${tab === n.id ? "neon-text" : ""}`}>{n.icon}</span>
-                <span className="font-display text-[8.5px] uppercase tracking-wider">{n.short}</span>
+                <span className="font-display text-[8px] uppercase tracking-wide">{n.short}</span>
               </button>
             ))}
           </nav>
@@ -193,6 +195,7 @@ export default function Shell() {
                 {tab === "waivers" && <Waivers model={model} myId={me.rosterId} />}
                 {tab === "lineup" && <StartSit model={model} myId={me.rosterId} />}
                 {tab === "health" && <Availability model={model} myId={me.rosterId} />}
+                {tab === "depth" && <DepthCharts model={model} myId={me.rosterId} />}
                 {tab === "trades" && <Trades model={model} myId={me.rosterId} askAgent={askAgent} />}
                 {tab === "agent" && (
                   <Chat

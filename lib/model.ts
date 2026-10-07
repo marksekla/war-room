@@ -1140,6 +1140,8 @@ export class LeagueModel {
   }
 
   private needsCache: ReturnType<LeagueModel["computeNeeds"]> | null = null;
+  /** League-median rest-of-season strength by position (points per week), set with the needs table. */
+  private medianStrength: Record<string, number> = {};
 
   /**
    * Rank each team's starters by position for the rest of the season (1 = strongest), and call
@@ -1180,6 +1182,7 @@ export class LeagueModel {
         })
         .sort((a, b) => a - b);
       medianStarter[pos] = weakest[Math.floor(weakest.length / 2)] ?? 0;
+      this.medianStrength[pos] = median[pos];
     }
     return profiles.map((pr) => {
       const r = ranks.get(pr.team.rosterId)!;
@@ -1208,6 +1211,25 @@ export class LeagueModel {
         weekly: round1(pr.lineup.total),
       };
     });
+  }
+
+  /**
+   * How badly a roster is short at each position, weighted by how hard each position is to fix:
+   * starting RBs and WRs are scarce on waivers and in trades, QBs and TEs much less so.
+   */
+  rosterHoles(rosterId: number, ids: string[]) {
+    this.needsTable(); // make sure league medians exist
+    const scarcity: Record<string, number> = { RB: 1.4, WR: 1.1, TE: 0.8, QB: 0.6 };
+    const strength = this.positionStrength(ids);
+    const ranks = this.rankAgainstLeague(rosterId, ids);
+    let score = 0;
+    const gaps: Record<string, number> = {};
+    for (const pos of ["QB", "RB", "WR", "TE"]) {
+      const med = this.medianStrength[pos] || 1;
+      gaps[pos] = (med - strength[pos]) / med;
+      score += scarcity[pos] * Math.max(0, gaps[pos]);
+    }
+    return { score, gaps, ranks };
   }
 
   /** Where a set of players would rank at each position against the rest of the league (1 = best). */
@@ -1346,7 +1368,7 @@ export class LeagueModel {
     const myNeeds = this.teamNeeds(myId);
     const fillsMyNeed = get.some((id) => myNeeds.includes(this.players[id]?.pos as Position));
     if (overpay && level >= 3 && !(fillsMyNeed && perWk >= 1)) level -= 1; // you could likely get the same upgrade for less
-    const verdict = scale[level];
+    let verdict = scale[level];
 
     // Plain-English reasons so the number isn't a black box.
     const reasons: string[] = [];
@@ -1368,6 +1390,14 @@ export class LeagueModel {
         .filter((pos) => a[pos] !== b[pos])
         .map((pos) => `${pos} ${ordinal(b[pos])} → ${ordinal(a[pos])}`);
     };
+    // Post-trade roster balance: fixing one spot by opening a worse hole somewhere else is a trap,
+    // especially at RB/WR where replacements are scarce.
+    const n = this.teams.length;
+    const holesBefore = this.rosterHoles(myId, myBeforeFull);
+    const holesAfter = this.rosterHoles(myId, myAfter);
+    const created = (["RB", "WR", "QB", "TE"] as const).filter(
+      (pos) => holesAfter.ranks[pos] >= n - 2 && holesAfter.ranks[pos] - holesBefore.ranks[pos] >= 3 && holesAfter.gaps[pos] > 0.08
+    );
     const myShift = rankShift(myId, myBeforeFull, myAfter);
     if (myShift.length) reasons.push(`Your position groups vs the league (rest of season): ${myShift.join(", ")}.`);
     if (fillsMyNeed) {
@@ -1378,6 +1408,15 @@ export class LeagueModel {
           : `It fills your ${filled.join(", ")} need, but the lineup math still says you lose more than you gain. Look for a cheaper way to fix it.`
       );
     }
+    // A trade that opens a bottom-of-the-league hole is at best even, however the points add up today.
+    if (created.length && level > 2) {
+      level = created.some((p) => p === "RB" || p === "WR") ? 2 : Math.max(2, level - 1);
+      verdict = scale[level];
+    }
+    for (const pos of created)
+      flags.push(
+        `This leaves your ${pos}s ${ordinal(holesAfter.ranks[pos])} of ${n}${pos === "RB" || pos === "WR" ? `, and starting ${pos}s are the hardest thing to find on waivers or in trades` : ""}. You'd be trading one need for a bigger one.`
+      );
     const theirShift = rankShift(partnerId, theirBeforeFull, theirAfter);
     if (theirShift.length) reasons.push(`Their groups: ${theirShift.join(", ")}.`);
     const worst = perWeek.slice().sort((a, b) => a.me - b.me)[0];
@@ -1525,6 +1564,9 @@ export class LeagueModel {
       theirPerWeekAvg: round1(theirPerWk),
       fillsTheirNeed: fillsNeed,
       fillsMyNeed,
+      holesCreated: created as string[],
+      needScoreBefore: Math.round(holesBefore.score * 100) / 100,
+      needScoreAfter: Math.round(holesAfter.score * 100) / 100,
       myDrops: myFit.drops,
       theirDrops: theirFit.drops,
       myAdds: myFit.adds,
@@ -1625,13 +1667,17 @@ export class LeagueModel {
         if (r.theirPerWeekAvg < -0.25) continue;
         if (r.consensusRatio != null && (r.consensusRatio < 0.85 || r.consensusRatio > 1.3)) continue;
         if (r.acceptance === "Very unlikely" || r.acceptance === "Unlikely") continue;
+        // Never suggest fixing one need by opening a bigger hole.
+        if (r.holesCreated.length) continue;
+        if (r.needScoreAfter > r.needScoreBefore + 0.05) continue;
         const playoffAvg = r.myPlayoffDelta / Math.max(1, this.lastWeek - this.playoffStart + 1);
         const score =
           r.perWeekAvg +
           0.4 * playoffAvg +
           0.5 * Math.max(0, Math.min(1.5, r.theirPerWeekAvg)) + // deals that help them too get done
           (r.acceptance === "Likely" ? 0.5 : 0) +
-          (r.fillsTheirNeed ? 0.3 : 0) -
+          (r.fillsTheirNeed ? 0.3 : 0) +
+          2 * (r.needScoreBefore - r.needScoreAfter) - // leaves your roster more balanced
           (r.consensusRatio != null ? 1.5 * Math.abs(r.consensusRatio - 1) : 0);
         ideas.push({ partnerId, give: pk, get, result: r, score });
       }
