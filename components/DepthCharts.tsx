@@ -48,7 +48,6 @@ export default function DepthCharts({ model, myId }: { model: LeagueModel; myId:
   const [show, setShow] = useState<Record<Status, boolean>>({ mine: true, taken: true, available: true });
   const [team, setTeam] = useState("ALL");
   const [q, setQ] = useState("");
-  const [basis, setBasis] = useState<"week" | "ros">("week");
   const weeklyCurrent = model.nfl?.ecr?.week === model.week;
 
   const teams = useMemo(() => {
@@ -62,8 +61,25 @@ export default function DepthCharts({ model, myId }: { model: LeagueModel; myId:
 
   // Group every player by team and position once, ordered the way a depth chart reads.
   const charts = useMemo(() => {
-    const useWeek = basis === "week" && weeklyCurrent;
-    const rankOf = (v: PlayerView) => (useWeek ? v.ecrWeek ?? v.ecrRos : v.ecrRos);
+    // This week's positional rank. FantasyPros weekly ranks when they're out for this week; otherwise
+    // War Room's own ranks from this week's expected points, which already account for injuries,
+    // chance to play and depth-chart changes. Teams on bye fall back to rest-of-season order.
+    const weekRank = new Map<string, number>();
+    if (!weeklyCurrent) {
+      for (const c of COLS) {
+        [...model.views.values()]
+          .filter((v) => v.p.pos === c.pos && v.p.team)
+          .map((v) => ({ id: v.p.id, e: model.expected(v.p.id, model.week) }))
+          .filter((x) => x.e > 0.5)
+          .sort((a, b) => b.e - a.e)
+          .forEach((x, i) => weekRank.set(x.id, i + 1));
+      }
+    }
+    const rankOf = (v: PlayerView): number | null => {
+      if (!model.gameFor(v.p.team, model.week)) return v.ecrRos;
+      if (weeklyCurrent) return v.ecrWeek ?? null;
+      return weekRank.get(v.p.id) ?? null;
+    };
     const by = new Map<string, Map<string, { v: PlayerView; rank: number | null; status: Status }[]>>();
     for (const v of model.views.values()) {
       if (!v.p.team || !COLS.some((c) => c.pos === v.p.pos)) continue;
@@ -88,7 +104,7 @@ export default function DepthCharts({ model, myId }: { model: LeagueModel; myId:
         t.set(pos, list.slice(0, COLS.find((c) => c.pos === pos)!.max));
       }
     return by;
-  }, [model, myId, basis, weeklyCurrent]);
+  }, [model, myId, weeklyCurrent]);
 
   const s = q.trim().toLowerCase();
   const shownTeams = teams.filter((t) => {
@@ -104,21 +120,6 @@ export default function DepthCharts({ model, myId }: { model: LeagueModel; myId:
       <Panel
         title={`Depth charts · Week ${model.week}`}
         corners
-        right={
-          <div className="flex rounded-lg border border-white/10 p-0.5 font-mono text-xs">
-            {(["week", "ros"] as const).map((k) => (
-              <button
-                key={k}
-                onClick={() => setBasis(k)}
-                disabled={k === "week" && !weeklyCurrent}
-                title={k === "week" && !weeklyCurrent ? "This week's expert ranks aren't out yet, so rest-of-season ranks are used" : undefined}
-                className={`rounded-md px-2.5 py-1 disabled:opacity-40 ${basis === k || (k === "ros" && !weeklyCurrent) ? "bg-cyan-400/20 text-cyan-100" : "text-slate-400 hover:text-slate-100"}`}
-              >
-                {k === "week" ? `Wk ${model.week}` : "ROS"}
-              </button>
-            ))}
-          </div>
-        }
       >
         <div className="flex flex-wrap items-center gap-3">
           <select className="input w-full sm:w-64" value={team} onChange={(e) => setTeam(e.target.value)}>
@@ -151,9 +152,12 @@ export default function DepthCharts({ model, myId }: { model: LeagueModel; myId:
           </div>
         </div>
         <p className="mt-3 text-xs text-slate-500">
-          Ordered by FantasyPros expert consensus ({basis === "week" && weeklyCurrent ? `week ${model.week} PPR ranks` : "rest-of-season PPR ranks"}), so it
-          shows the fantasy pecking order rather than the team&apos;s official depth chart. The number is each player&apos;s positional rank. Tap anyone
-          for usage, injuries and news.
+          Ordered by who&apos;s expected to produce this week:{" "}
+          {weeklyCurrent
+            ? `FantasyPros expert ranks for week ${model.week}`
+            : `War Room's week ${model.week} projections (FantasyPros weekly ranks replace them once they're out)`}
+          . Injured players drop down as their chance to play falls. Teams on bye use rest-of-season order. The number is the player&apos;s
+          positional rank this week. Tap anyone for usage, injuries and news.
         </p>
       </Panel>
 
