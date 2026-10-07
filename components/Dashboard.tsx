@@ -506,7 +506,7 @@ export default function Dashboard({
                   </td>
                   {(["QB", "RB", "WR", "TE"] as const).map((p) => (
                     <td key={p}>
-                      <StrengthCell rank={n.ranks[p]} of={model.teams.length} />
+                      <StrengthCell rank={n.ranks[p]} of={model.teams.length} pts={n.strength[p]} />
                     </td>
                   ))}
                   <td className="text-rose-300">{n.needs.join(", ") || "-"}</td>
@@ -519,21 +519,27 @@ export default function Dashboard({
           </table>
         </div>
         <p className="mt-3 text-xs text-slate-500">
-          Rest-of-season starter strength by position (1 = strongest), from season-long usage and production blended with FantasyPros
-          rest-of-season rankings and the trade market, with long injuries discounted. A need means that team&apos;s starters are clearly below the
-          league&apos;s typical team there. Target teams whose needs match your surplus.
+          Rank by position (1 = strongest) with that group&apos;s rest-of-season points per week in grey. Each group counts the starters that spot
+          needs (QB1, RB1-2, WR1-2, TE1) plus the next backups at partial weight, since flex spots, byes and injuries put depth on the field.
+          Player values blend season-long usage and scoring with FantasyPros rest-of-season rankings and the trade market, and players on IR count
+          from the week they&apos;re due back. A need means that group is clearly below the league&apos;s typical team.
         </p>
       </Panel>
     </div>
   );
 }
 
-function StrengthCell({ rank, of }: { rank: number; of: number }) {
+function StrengthCell({ rank, of, pts }: { rank: number; of: number; pts?: number }) {
   const tone =
     rank <= of / 3
       ? "text-lime-300"
       : rank > (2 * of) / 3
         ? "text-rose-300"
         : "text-slate-300";
-  return <span className={`font-mono ${tone}`}>{rank}</span>;
+  return (
+    <span className="whitespace-nowrap">
+      <span className={`font-mono ${tone}`}>{rank}</span>
+      {pts != null && <span className="ml-1.5 font-mono text-[10px] text-slate-500">{pts.toFixed(0)}</span>}
+    </span>
+  );
 }

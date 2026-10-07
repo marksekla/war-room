@@ -35,6 +35,7 @@ export function playerSummary(m: LeagueModel, v: PlayerView, detail = false) {
     valuePerGame: v.valuePg,
     valueOverReplacement: v.vorp,
     restOfSeasonPts: v.rosPoints,
+    restOfSeasonRank: m.rosRank(v.p.id) != null ? `${v.p.pos}${m.rosRank(v.p.id)}` : undefined,
     lastSnapPct: pct(v.snapShare),
     targetSharePct: pct(v.targetShare),
     carrySharePct: pct(v.carryShare),
@@ -671,7 +672,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "get_league_needs",
-    description: "Every team's starter strength rank by position, likely needs and bench surplus. Use it to find trade partners.",
+    description: "Every team's rest-of-season strength rank by position (starters plus partial-weight depth, IR players counted from their return week), points per week of each group, needs (clear gaps vs the typical team) and bench surplus. Use it to find trade partners.",
     parameters: { type: "object", properties: {} },
     label: () => "Mapping every team's needs",
     run: (m) =>
@@ -680,6 +681,7 @@ export const TOOLS: ToolDef[] = [
         owner: n.team.ownerName,
         record: `${n.team.wins}-${n.team.losses}`,
         positionRanks: n.ranks,
+        restOfSeasonPtsPerWeekByPosition: Object.fromEntries(Object.entries(n.strength).map(([k, v]) => [k, Math.round(v * 10) / 10])),
         needs: n.needs,
         surplus: n.surplus,
       })),

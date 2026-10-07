@@ -178,7 +178,17 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
           <Tile label="Value / game" value={v.valuePg.toFixed(1)} sub={`${v.vorp > 0 ? "+" : ""}${v.vorp.toFixed(1)} over repl.`} />
           <Tile
             label="ROS pts"
-            value={v.rosPoints.toFixed(0)}
+            value={
+              <span>
+                {v.rosPoints.toFixed(0)}
+                {model.rosRank(v.p.id) != null && (
+                  <span className="ml-1.5 text-xs font-normal text-cyan-300/80">
+                    {v.p.pos}
+                    {model.rosRank(v.p.id)}
+                  </span>
+                )}
+              </span>
+            }
             sub={
               v.projNext != null ? (
                 <span title={`Sleeper ${v.projSleeper ?? "-"} · ESPN ${v.projEspn ?? "-"}`}>

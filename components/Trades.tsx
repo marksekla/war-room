@@ -26,7 +26,11 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
       .map((id) => model.view(id))
       .filter(Boolean)
       .sort((a, b) => POS_ORDER[a!.p.pos] - POS_ORDER[b!.p.pos] || score(b!) - score(a!)) as PlayerView[];
-  const label = (v: PlayerView) => (metric === "ros" ? `${v.rosPoints.toFixed(0)} ROS` : `${score(v).toFixed(1)} WK${model.week}`);
+  const label = (v: PlayerView) => {
+    const back = model.returnWeek.get(v.p.id);
+    const tag = back != null && back > model.week ? (back > 18 ? "out for season · " : `back W${back} · `) : "";
+    return metric === "ros" ? `${tag}${v.rosPoints.toFixed(0)} ROS` : `${score(v).toFixed(1)} WK${model.week}`;
+  };
 
   const result = useMemo(
     () => (give.length && get.length && partner ? model.evaluateTrade(myId, partnerId, give, get) : null),
@@ -98,7 +102,7 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
       <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
         <RosterPicker
           title={`You send (${me.teamName})`}
-          players={sortRoster(me.players)}
+          players={sortRoster(model.rosterAll(myId))}
           selected={give}
           onToggle={(id) => toggle(give, setGive, id)}
           tone="rose"
@@ -106,7 +110,7 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
           locked={locked}
           onLock={toggleLock}
         />
-        <RosterPicker title={`You get (${partner?.teamName ?? ""})`} players={sortRoster(partner?.players ?? [])} selected={get} onToggle={(id) => toggle(get, setGet, id)} tone="lime" label={label} />
+        <RosterPicker title={`You get (${partner?.teamName ?? ""})`} players={sortRoster(partner ? model.rosterAll(partner.rosterId) : [])} selected={get} onToggle={(id) => toggle(get, setGet, id)} tone="lime" label={label} />
       </div>
 
       <div ref={simRef} className="scroll-mt-24" />
