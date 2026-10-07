@@ -3,8 +3,10 @@ name: Update NFL data
 
 on:
   schedule:
-    - cron: "17 11 * * *" # ~7am ET
-    - cron: "43 23 * * *" # ~7pm ET (after practice reports)
+    - cron: "17 11 * * *"    # daily, ~7am ET
+    - cron: "43 23 * * *"    # daily, ~8pm ET
+    - cron: "37 21 * * 3-6"  # Wed-Sat, ~5:30pm ET (practice reports, game statuses)
+    - cron: "7 15 * * 0"     # Sunday, ~11am ET (before the early games)
   workflow_dispatch:
 
 permissions:
