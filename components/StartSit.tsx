@@ -44,6 +44,7 @@ export default function StartSit({ model, myId }: { model: LeagueModel; myId: nu
     const exp = val ?? model.expected(id, week);
     const wn = g ? weatherNote(wx[v.p.team ?? ""]) : null;
     const cur = week === model.week && g && !["K", "DEF"].includes(v.p.pos);
+    const pc = cur ? model.playChance(id) : null;
     // Chips only for clear absences (out or doubtful); the player card lists questionable ones too.
     const dOut = cur ? model.unitOut(g!.opp, "def").filter((x) => x.status !== "Questionable") : [];
     const olOut = cur ? model.unitOut(v.p.team, "ol").filter((x) => x.status !== "Questionable") : [];
@@ -56,12 +57,30 @@ export default function StartSit({ model, myId }: { model: LeagueModel; myId: nu
             <PlayerName v={v} className="max-w-[120px] sm:max-w-none" />
             <span className="hidden text-xs text-slate-500 sm:inline">{v.p.team}</span>
             <InjuryTag status={v.p.injury} />
-            {v.adv?.prac && v.adv.prac.w === week && v.adv.prac.st !== "FP" && !/rest|not injury/i.test(v.adv.prac.inj ?? "") && (
+            {pc && pc.p < 0.95 && (
+              <span
+                title={pc.why}
+                className={`whitespace-nowrap rounded border px-1 font-mono text-[10px] ${
+                  pc.p >= 0.8 ? "border-lime-400/40 text-lime-300" : pc.p >= 0.5 ? "border-amber-300/40 text-amber-200" : "border-rose-400/40 text-rose-300"
+                }`}
+              >
+                {Math.round(pc.p * 100)}% to play
+              </span>
+            )}
+            {!pc && v.adv?.prac && v.adv.prac.w === week && v.adv.prac.st !== "FP" && !/rest|not injury/i.test(v.adv.prac.inj ?? "") && (
               <PracChip st={v.adv.prac.st} />
             )}
           </div>
         </td>
-        <td className="font-mono font-semibold neon-text">{exp.toFixed(1)}</td>
+        <td className="font-mono font-semibold neon-text">
+          {exp.toFixed(1)}
+          {cur && v.ecrWeek != null && (
+            <span className="block text-[10px] font-normal text-slate-500" title="FantasyPros expert consensus rank this week">
+              FP {v.p.pos}
+              {Math.round(v.ecrWeek)}
+            </span>
+          )}
+        </td>
         <td className="font-mono text-xs">
           {g ? (
             <span className="flex items-center gap-1.5">
@@ -184,7 +203,7 @@ export default function StartSit({ model, myId }: { model: LeagueModel; myId: nu
         </div>
       </Panel>
       <p className="text-xs text-slate-500">
-        Expected points blend projections, recent usage, expected points from opportunity and matchup, and zero out byes and players ruled out. DNP/LP chips are this week&apos;s practice report. -2D means two of the opponent&apos;s defensive starters are out; OL-2 means two of his own linemen are out (hover or tap a player for names). ≋ ☂ ❄ mark wind, rain/snow or cold at kickoff. Check final news before lock; the AI agent can do that for you.
+        Expected points blend Sleeper and ESPN projections, FantasyPros weekly expert ranks, season-long usage, matchup and Vegas, times each player&apos;s chance to play (learned from past injury reports plus this week&apos;s practice reports and news). When a teammate is out, projections that already react to the depth chart count more. -2D means two of the opponent&apos;s defensive starters are out; OL-2 means two of his own linemen are out (hover or tap a player for names). ≋ ☂ ❄ mark wind, rain/snow or cold at kickoff. Check final news before lock; the AI agent can do that for you.
       </p>
     </div>
   );

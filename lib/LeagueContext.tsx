@@ -112,7 +112,8 @@ export function LeagueProvider({ children }: { children: React.ReactNode }) {
         const superflex = lg.roster_positions.includes("SUPER_FLEX") || lg.roster_positions.filter((r) => r === "QB").length > 1;
         const ppr = lg.scoring_settings?.rec ?? 1;
         setProgress("Loading players, stats, schedule and advanced data");
-        const [players, stats, projections, schedule, trending, nfl, values, injuries, activity, espnProj] = await Promise.all([
+        const pastWeeks = statWeeks.filter((w) => w < week);
+        const [players, stats, projections, schedule, trending, nfl, values, injuries, activity, espnProj, projHistory] = await Promise.all([
           api<PlayerMap>(`/api/players`),
           api<WeekStats[]>(`/api/stats?season=${season}&weeks=${statWeeks.join(",")}&current=${week}`),
           api<WeekProjections[]>(`/api/projections?season=${season}&weeks=${week},${Math.min(18, week + 1)}`),
@@ -124,10 +125,20 @@ export function LeagueProvider({ children }: { children: React.ReactNode }) {
           api<EspnInjury[]>(`/api/injuries`).catch(() => null),
           api<LeagueActivity>(`/api/activity?id=${saved.leagueId}&week=${week}`).catch(() => null),
           api<Record<string, StatLine>>(`/api/espn-proj?season=${season}&week=${week}`).catch(() => null),
+          pastWeeks.length
+            ? api<WeekProjections[]>(`/api/proj-history?season=${season}&weeks=${pastWeeks.join(",")}`).catch(() => null)
+            : Promise.resolve(null),
         ]);
         if (cancelled) return;
         setProgress("Running the numbers");
-        const m = new LeagueModel(bundle, players, stats, projections, schedule, trending, { nfl, values, injuries, activity, espnProj });
+        const m = new LeagueModel(bundle, players, stats, projections, schedule, trending, {
+          nfl,
+          values,
+          injuries,
+          activity,
+          espnProj,
+          projHistory,
+        });
         setModel(m);
         if (saved.rosterId == null || !m.team(saved.rosterId)) {
           const guess = saved.username

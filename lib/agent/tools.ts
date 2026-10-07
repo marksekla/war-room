@@ -40,6 +40,11 @@ export function playerSummary(m: LeagueModel, v: PlayerView, detail = false) {
     carrySharePct: pct(v.carryShare),
     trendingAdds48h: v.trendingAdds || undefined,
     marketValue: v.market ? { value: v.market.value, overallRank: v.market.rank, posRank: v.market.posRank, trend30d: v.market.trend } : undefined,
+    expertRank: v.ecrRos != null ? { restOfSeason: `${v.p.pos}${Math.round(v.ecrRos)}`, thisWeek: v.ecrWeek != null ? `${v.p.pos}${Math.round(v.ecrWeek)}` : undefined, source: `FantasyPros consensus (${m.nfl?.ecr?.date ?? "latest"})` } : undefined,
+    chanceToPlayThisWeek:
+      v.p.pos !== "DEF" && m.gameFor(v.p.team, m.week) && (v.p.injury || m.playChance(v.p.id).p < 0.95)
+        ? { pct: Math.round(m.playChance(v.p.id).p * 100), why: m.playChance(v.p.id).why, finalReport: m.playChance(v.p.id).official }
+        : undefined,
     practice: practiceLine(m, v),
     expectedReturnWeek: m.returnWeek.get(v.p.id) ?? undefined,
     roleRisk: m.roleShift.get(v.p.id)
@@ -388,6 +393,13 @@ export const TOOLS: ToolDef[] = [
         marketValue: r.market
           ? { youSend: r.market.give, youGet: r.market.get, note: "FantasyCalc redraft values from real trades. They count stars more than depth." }
           : null,
+        expertRanks: r.expert
+          ? { youSend: r.expert.give, youGet: r.expert.get, note: "FantasyPros rest-of-season consensus (positional ranks)." }
+          : null,
+        valueRatio: r.consensusRatio,
+        valueRatioNote: "Market + expert value you send / value you get (star premium). 0.92-1.08 = fair; above 1.25 = you overpay.",
+        theirAvgGainPerWeek: r.theirPerWeekAvg,
+        fillsTheirNeed: r.fillsTheirNeed,
         weekByWeek: r.perWeek,
         youGive: r.give.map((v) => playerSummary(m, v)),
         youGet: r.get.map((v) => playerSummary(m, v)),
@@ -494,7 +506,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "get_injury_report",
     description:
-      "Current injury designations and practice participation for fantasy-relevant players, from ESPN (refreshed every 15 min) and the official NFL practice report. Optionally filter to the user's roster or one NFL team.",
+      "Current injury designations, practice participation and War Room's learned chance-to-play % for fantasy-relevant players, from ESPN (refreshed every 15 min) and the official NFL practice report. Optionally filter to the user's roster or one NFL team.",
     parameters: {
       type: "object",
       properties: { scope: { type: "string", description: "'mine' for the user's roster, an NFL team abbreviation, or 'all'" } },
@@ -517,6 +529,8 @@ export const TOOLS: ToolDef[] = [
           owner: m.ownerName(v.p.id),
           status: v.p.injury,
           practice: practiceLine(m, v) ?? null,
+          chanceToPlayPct: m.gameFor(v.p.team, m.week) ? Math.round(m.playChance(v.p.id).p * 100) : 0,
+          why: m.playChance(v.p.id).why,
           espn: v.espn ? `${v.espn.status}${v.espn.short ? `: ${v.espn.short}` : ""}` : null,
         }));
     },

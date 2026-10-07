@@ -220,6 +220,19 @@ export interface NflData {
   startersReportWeek?: number | null;
   /** Learned from past results by scripts/calibrate.py (refits every time a week finishes). */
   calib?: Calibration | null;
+  /** FantasyPros expert consensus (PPR). Keys are Sleeper ids, team abbreviations for defenses,
+   * or "n:<normalized name>:<team>" when no id match exists. ros = [rank, std dev]. */
+  ecr?: { date: string; week: number | null; ros: Record<string, [number, number | null]>; wk: Record<string, number> } | null;
+  /** Practice participation changes this week, by gsis id: { Wed: "DNP", Thu: "LP" }. */
+  pracLog?: { w: number; p: Record<string, Record<string, "DNP" | "LP" | "FP">> } | null;
+}
+
+/** Learned chance-to-play model (scripts/calibrate.py play_model). */
+export interface PlayCalib {
+  n: number;
+  rates: Record<string, Record<string, number>>; // designation -> practice (DNP/LP/FP/all) -> share who played
+  q?: Record<string, number>; // logistic coefficients for Questionable players
+  qBrier?: number;
 }
 
 export interface Calibration {
@@ -237,6 +250,9 @@ export interface Calibration {
   matchup?: Record<string, { vegas: number; dvp: number }>;
   /** How much FantasyCalc market value should pull a player's value, by position (learned from snapshots). */
   market?: Record<string, number> | null;
+  /** How much FantasyPros rest-of-season expert ranks should pull a player's value, by position. */
+  ecr?: Record<string, number> | null;
+  play?: PlayCalib | null;
 }
 
 export interface MarketValue {

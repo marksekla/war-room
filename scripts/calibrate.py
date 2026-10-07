@@ -22,7 +22,7 @@ import pandas as pd
 NFLVERSE = "https://github.com/nflverse/nflverse-data/releases/download"
 FFOPP = "https://github.com/ffverse/ffopportunity/releases/download/latest-data"
 POS = ["QB", "RB", "WR", "TE"]
-VERSION = 3
+VERSION = 4
 
 # ESPN stat id -> (Sleeper-style key) for PPR scoring of ESPN projections.
 ESPN_STAT = {"3": "pass_yd", "4": "pass_td", "20": "pass_int", "24": "rush_yd", "25": "rush_td",
@@ -273,8 +273,141 @@ def market_weight(data: pd.DataFrame, history: dict, ids: pd.DataFrame) -> dict 
     return out or None
 
 
+def ecr_weight(data: pd.DataFrame, history: dict, ids: pd.DataFrame) -> dict | None:
+    """Learns how much FantasyPros rest-of-season expert rankings should pull a player's value,
+    from the weekly snapshots War Room saves. Rank maps to points through log(rank)."""
+    if not history:
+        return None
+    ranks = {}
+    for season, weeks in history.items():
+        for week, snap in weeks.items():
+            for g, rk in snap.items():
+                ranks[(int(season), int(week), g)] = float(rk)
+    d = data.dropna(subset=["base"]).copy()
+    d["rk"] = [ranks.get((int(r.season), int(r.week), r.gsis), np.nan) for r in d.itertuples(index=False)]
+    d = d.dropna(subset=["rk"])
+    out = {}
+    for pos in POS:
+        x = d[d.pos == pos]
+        if len(x) < 200:
+            continue
+        A = np.column_stack([np.ones(len(x)), np.log(x.rk.clip(lower=1))])
+        c, *_ = np.linalg.lstsq(A, x.y.to_numpy(), rcond=None)
+        diff = A @ c - x.base.to_numpy()
+        den = float(diff @ diff)
+        if den <= 0:
+            continue
+        m = float((x.y.to_numpy() - x.base.to_numpy()) @ diff / den)
+        out[pos] = round(min(0.6, max(0.0, m)), 3)
+    return out or None
+
+
+INJ_GROUPS = [
+    ("soft", ("hamstring", "calf", "groin", "quad", "pectoral", "oblique", "abdom", "adductor")),
+    ("concussion", ("concussion", "head")),
+    ("lower", ("ankle", "knee", "foot", "toe", "hip", "achilles", "heel", "shin", "fibula", "tibia")),
+    ("nonInjury", ("illness", "not injury", "personal", "rest")),
+]
+
+
+def injury_group(s) -> str:
+    s = str(s or "").lower()
+    for name, keys in INJ_GROUPS:
+        if any(k in s for k in keys):
+            return name
+    return "upper" if s and s != "nan" else "none"
+
+
+PLAY_FEATS = ["dnp", "fp", "prevOut", "soft", "lower", "concussion", "nonInjury", "QB", "RB", "TE"]
+
+
+def logistic(X: np.ndarray, y: np.ndarray, l2: float = 2.0, iters: int = 50) -> np.ndarray:
+    """Logistic regression by Newton's method with a ridge penalty (intercept not penalized)."""
+    w = np.zeros(X.shape[1])
+    reg = np.full(X.shape[1], l2)
+    reg[0] = 0
+    for _ in range(iters):
+        p = 1 / (1 + np.exp(-(X @ w)))
+        g = X.T @ (p - y) + reg * w
+        H = (X * (p * (1 - p))[:, None]).T @ X + np.diag(reg)
+        step = np.linalg.solve(H, g)
+        w -= step
+        if np.abs(step).max() < 1e-6:
+            break
+    return w
+
+
+def play_model(seasons: list[int], ids: pd.DataFrame) -> dict | None:
+    """P(a player with a real role suits up | his final injury designation and practice report).
+    Learned from past seasons' official injury reports matched against who actually played."""
+    pfr2g = {r.pfr_id: r.gsis_id for r in ids[["pfr_id", "gsis_id"]].itertuples(index=False)
+             if isinstance(r.pfr_id, str) and isinstance(r.gsis_id, str)}
+    short = {"Did Not Participate In Practice": "DNP", "Limited Participation in Practice": "LP",
+             "Full Participation in Practice": "FP"}
+    rows = []
+    for season in seasons:
+        inj = read(f"{NFLVERSE}/injuries/injuries_{season}.csv")
+        sn = read(f"{NFLVERSE}/snap_counts/snap_counts_{season}.csv")
+        if inj.empty or sn.empty:
+            continue
+        sn = sn[sn.game_type == "REG"].copy()
+        sn["team"] = sn.team.map(lambda t: TEAM_FIX.get(t, t))
+        sn["gsis"] = sn.pfr_player_id.map(pfr2g)
+        played = set(zip(sn.gsis, sn.week))
+        team_weeks = set(zip(sn.team, sn.week))
+        role = {}
+        for g, gg in sn[sn.gsis.notna()].groupby("gsis"):
+            gg = gg.sort_values("week")
+            wk, pct = gg.week.to_numpy(), gg.offense_pct.to_numpy()
+            for w in range(2, 19):
+                prior = pct[wk < w][-3:]
+                if len(prior):
+                    role[(g, w)] = float(prior.mean())
+        inj = inj[(inj.game_type == "REG") & inj.position.isin(POS)].copy()
+        inj["team"] = inj.team.map(lambda t: TEAM_FIX.get(t, t))
+        inj = inj.sort_values(["gsis_id", "week"])
+        last = {}
+        for r in inj.itertuples(index=False):
+            if (r.team, r.week) not in team_weeks or role.get((r.gsis_id, r.week), 0) < 0.4:
+                last[r.gsis_id] = (r.week, (r.gsis_id, r.week) in played)
+                continue
+            pw = last.get(r.gsis_id)
+            ok = (r.gsis_id, r.week) in played
+            rows.append({
+                "rs": r.report_status if isinstance(r.report_status, str) else "None",
+                "ps": short.get(r.practice_status, "LP") if isinstance(r.practice_status, str) else "LP",
+                "prevOut": bool(pw and pw[0] == r.week - 1 and not pw[1]),
+                "grp": injury_group(r.report_primary_injury if isinstance(r.report_primary_injury, str) else r.practice_primary_injury),
+                "pos": r.position, "y": 1.0 if ok else 0.0,
+            })
+            last[r.gsis_id] = (r.week, ok)
+    if len(rows) < 500:
+        return None
+    d = pd.DataFrame(rows)
+    out = {"n": int(len(d)), "rates": {}}
+    # Smoothed rates for every designation x practice combination (Beta prior toward the designation's overall rate).
+    for rs, g in d.groupby("rs"):
+        overall = (g.y.sum() + 1) / (len(g) + 2)
+        out["rates"][rs] = {"all": round(float(overall), 3)}
+        for ps, h in g.groupby("ps"):
+            out["rates"][rs][ps] = round(float((h.y.sum() + 10 * overall) / (len(h) + 10)), 3)
+    # Questionable is where the real uncertainty is: fit a small logistic model on it.
+    q = d[d.rs == "Questionable"]
+    if len(q) >= 300:
+        X = np.column_stack([np.ones(len(q))] + [
+            (q.ps == "DNP"), (q.ps == "FP"), q.prevOut, q.grp == "soft", q.grp == "lower", q.grp == "concussion",
+            q.grp == "nonInjury", q.pos == "QB", q.pos == "RB", q.pos == "TE",
+        ]).astype(float)
+        w = logistic(X, q.y.to_numpy())
+        out["q"] = {"intercept": round(float(w[0]), 3), **{f: round(float(c), 3) for f, c in zip(PLAY_FEATS, w[1:])}}
+        p = 1 / (1 + np.exp(-(X @ w)))
+        out["qBrier"] = round(float(np.mean((p - q.y.to_numpy()) ** 2)), 3)
+    log(f"  calib: play model n={out['n']} rates={out['rates']} q={out.get('q')}")
+    return out
+
+
 def calibrate(season: int, max_week: int, ids: pd.DataFrame, games: pd.DataFrame, prev: dict | None,
-              market_history: dict | None = None) -> dict | None:
+              market_history: dict | None = None, ecr_history: dict | None = None) -> dict | None:
     """Returns the calibration block, or the previous one if nothing new happened."""
     fresh = prev and prev.get("version") == VERSION and prev.get("season") == season and prev.get("throughWeek", -1) >= max_week
     if fresh and prev.get("weights"):  # refit if projections were missing last time
@@ -344,6 +477,14 @@ def calibrate(season: int, max_week: int, ids: pd.DataFrame, games: pd.DataFrame
 
     # 5) Market value prior (learned from War Room's own weekly FantasyCalc snapshots).
     out["market"] = market_weight(data, market_history or {}, ids)
+    # 6) Expert consensus prior (FantasyPros rest-of-season ranks, from War Room's weekly snapshots).
+    out["ecr"] = ecr_weight(data, ecr_history or {}, ids)
+    # 7) Chance to play from injury designations + practice reports (last 3 seasons + this one).
+    try:
+        out["play"] = play_model([season - 3, season - 2, season - 1, season], ids)
+    except Exception as e:  # noqa: BLE001
+        log(f"  calib: play model failed ({e.__class__.__name__}: {e})")
+        out["play"] = (prev or {}).get("play")
 
     # 3) Honest accuracy: train on last season only, test on this season (average miss in PPR points).
     if not cur.empty and not last.empty:
@@ -362,5 +503,5 @@ def calibrate(season: int, max_week: int, ids: pd.DataFrame, games: pd.DataFrame
             out["accuracy"] = {k: round(float(np.mean(v)), 2) for k, v in mae.items()}
             out["accuracy"]["n"] = int(len(test))
     log(f"  calib: weights {out['weights']}, noProj {out['weightsNoProj']}, blend {out['projBlend']}, matchup {out['matchup']}, "
-        f"market {out['market']}, sd {out['sd']}, avail {out['avail']}, accuracy {out['accuracy']}")
+        f"market {out['market']}, ecr {out.get('ecr')}, sd {out['sd']}, avail {out['avail']}, accuracy {out['accuracy']}")
     return out

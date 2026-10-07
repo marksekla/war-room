@@ -6,6 +6,7 @@
 
 import type {
   EspnInjury,
+  PlayCalib,
   Game,
   LeagueActivity,
   LeagueBundle,
@@ -63,6 +64,12 @@ export interface PlayerView {
   /** This week's projection from each source (league scoring). projNext is their average. */
   projSleeper: number | null;
   projEspn: number | null;
+  /** FantasyPros expert consensus: rest-of-season positional rank (and spread), this week's rank. */
+  ecrRos: number | null;
+  ecrSd: number | null;
+  ecrWeek: number | null;
+  /** Points per game the expert consensus rank implies (this league's scoring). */
+  ecrPg?: number | null;
 }
 
 export interface Extras {
@@ -71,6 +78,20 @@ export interface Extras {
   injuries?: EspnInjury[] | null;
   activity?: LeagueActivity | null;
   espnProj?: Record<string, StatLine> | null;
+  /** Pre-game Sleeper projections for weeks already played (for "projected vs actual"). */
+  projHistory?: WeekProjections[] | null;
+}
+
+/** Chance a player suits up, with the evidence behind it. */
+export interface PlayChance {
+  p: number; // 0-1
+  status: string | null; // designation used
+  official: boolean; // true once the final game-status report is out
+  practice: { day: string; st: "DNP" | "LP" | "FP" }[];
+  injury: string | null;
+  missedLast: boolean;
+  note: string | null; // latest news/comment used
+  why: string;
 }
 
 export interface UnitOut {
@@ -153,8 +174,11 @@ export class LeagueModel {
   private gamesByTeamWeek = new Map<string, GameInfo>();
   private advBySleeper = new Map<string, NflPlayer>();
   private advByGsis = new Map<string, NflPlayer>();
+  private gsisBySleeper = new Map<string, string>();
   private espnById = new Map<string, EspnInjury>();
   private espnByName = new Map<string, EspnInjury>();
+  private avgImpliedCache = new Map<number, number>();
+  private playCache = new Map<string, PlayChance>();
   /** Week an injured player is expected back (ESPN return date, or a default for IR/PUP). */
   readonly returnWeek = new Map<string, number>();
   /** Teammates whose role should shrink when a better player returns from injury. */
@@ -226,7 +250,10 @@ export class LeagueModel {
     this.activity = extras.activity ?? null;
     for (const [gsis, a] of Object.entries(this.nfl?.players ?? {})) {
       this.advByGsis.set(gsis, a);
-      if (a.sid) this.advBySleeper.set(a.sid, a);
+      if (a.sid) {
+        this.advBySleeper.set(a.sid, a);
+        this.gsisBySleeper.set(a.sid, gsis);
+      }
     }
     for (const i of extras.injuries ?? []) {
       if (i.espnId) this.espnById.set(i.espnId, i);
@@ -249,6 +276,22 @@ export class LeagueModel {
 
   private espnFor(p: Player): EspnInjury | null {
     return (p.espnId ? this.espnById.get(p.espnId) : undefined) ?? this.espnByName.get(`${normName(p.name)}:${p.team ?? ""}`) ?? null;
+  }
+
+  /** FantasyPros consensus entry: by Sleeper id, team (defenses), or name + team. */
+  private ecrFor(p: Player): { ros: [number, number | null] | null; wk: number | null } {
+    const e = this.nfl?.ecr;
+    if (!e) return { ros: null, wk: null };
+    const keys = p.pos === "DEF" ? [p.id, p.team ?? ""] : [p.id, `n:${normName(p.name)}:${p.team ?? "FA"}`];
+    let ros: [number, number | null] | null = null;
+    let wk: number | null = null;
+    for (const k of keys) {
+      if (!ros && e.ros[k]) ros = e.ros[k];
+      if (wk == null && e.wk[k] != null) wk = e.wk[k];
+    }
+    // Weekly ranks only count for the week they were made for.
+    if (e.week != null && e.week !== this.week) wk = null;
+    return { ros, wk };
   }
 
   /**
@@ -350,12 +393,16 @@ export class LeagueModel {
   /** Vegas: a team expected to score more than the week's average lifts its players. */
   vegasFactor(pos: Position, g: GameInfo | null, week: number): number {
     if (!g || g.impliedTotal == null) return 1;
-    const totals: number[] = [];
-    for (const x of this.schedule.games) {
-      if (x.week !== week || x.total == null || x.spread == null) continue;
-      totals.push(x.total / 2);
+    let avgImplied = this.avgImpliedCache.get(week);
+    if (avgImplied == null) {
+      const totals: number[] = [];
+      for (const x of this.schedule.games) {
+        if (x.week !== week || x.total == null || x.spread == null) continue;
+        totals.push(x.total / 2);
+      }
+      avgImplied = totals.length ? totals.reduce((a, b) => a + b, 0) / totals.length : 22.5;
+      this.avgImpliedCache.set(week, avgImplied);
     }
-    const avgImplied = totals.length ? totals.reduce((a, b) => a + b, 0) / totals.length : 22.5;
     if (pos === "DEF") {
       // Defenses score off the other team: a low opponent implied total means fewer points allowed and more sacks/turnovers.
       const oppImplied = g.game.total != null ? g.game.total - g.impliedTotal : null;
@@ -429,6 +476,13 @@ export class LeagueModel {
           ? (pb.sleeper * projSleeper + pb.espn * projEspn) / (pb.sleeper + pb.espn || 1)
           : projSleeper ?? projEspn;
 
+      // Rest-of-season value should not depend on this week's opponent: strip the matchup and
+      // Vegas effects back out of this week's projection before it feeds the per-game value.
+      const gNow = p.team ? this.gameFor(p.team, this.week) : null;
+      const projRos =
+        projNext != null && projNext > 0 && gNow
+          ? projNext / Math.max(0.7, this.matchupFactor(p.pos, gNow.opp) * this.vegasFactor(p.pos, gNow, this.week))
+          : projNext;
       // Learned weights (scripts/calibrate.py) when available, hand-set defaults otherwise.
       const calib = this.extras.nfl?.calib;
       const xfpRaw = adv?.s?.xfp;
@@ -438,21 +492,21 @@ export class LeagueModel {
       const cwNoProj = calib?.weightsNoProj?.[p.pos];
       let learned: number | null = null;
       if (log.length >= 2 && xfpRaw) {
-        if (cw && projNext != null && projNext > 0) learned = cw.proj * projNext + cw.last3 * last3 + cw.ppg * ppg + cw.xfp * xfpRaw * conv;
-        else if (cwNoProj && (projNext == null || projNext <= 0)) learned = cwNoProj.last3 * last3 + cwNoProj.ppg * ppg + cwNoProj.xfp * xfpRaw * conv;
-        else if (cwNoProj && projNext != null && projNext > 0)
-          learned = 0.5 * projNext + 0.5 * (cwNoProj.last3 * last3 + cwNoProj.ppg * ppg + cwNoProj.xfp * xfpRaw * conv);
+        if (cw && projRos != null && projRos > 0) learned = cw.proj * projRos + cw.last3 * last3 + cw.ppg * ppg + cw.xfp * xfpRaw * conv;
+        else if (cwNoProj && (projRos == null || projRos <= 0)) learned = cwNoProj.last3 * last3 + cwNoProj.ppg * ppg + cwNoProj.xfp * xfpRaw * conv;
+        else if (cwNoProj && projRos != null && projRos > 0)
+          learned = 0.5 * projRos + 0.5 * (cwNoProj.last3 * last3 + cwNoProj.ppg * ppg + cwNoProj.xfp * xfpRaw * conv);
       }
 
       let valuePg: number;
       if (learned != null) {
         valuePg = learned;
       } else if (log.length >= 2) {
-        valuePg = projNext != null && projNext > 0 ? 0.45 * projNext + 0.35 * last3 + 0.2 * ppg : 0.6 * last3 + 0.4 * ppg;
+        valuePg = projRos != null && projRos > 0 ? 0.45 * projRos + 0.35 * last3 + 0.2 * ppg : 0.6 * last3 + 0.4 * ppg;
       } else if (log.length === 1) {
-        valuePg = projNext != null && projNext > 0 ? 0.65 * projNext + 0.35 * ppg : ppg * 0.85;
+        valuePg = projRos != null && projRos > 0 ? 0.65 * projRos + 0.35 * ppg : ppg * 0.85;
       } else {
-        valuePg = projNext ?? 0;
+        valuePg = projRos ?? 0;
       }
       // Opportunity is stickier than efficiency: lean slightly toward expected points
       // (xFP, from nflverse/ffopportunity), converted to this league's scoring.
@@ -460,6 +514,7 @@ export class LeagueModel {
         valuePg = 0.85 * valuePg + 0.15 * xfpRaw * conv;
       }
 
+      const ecr = this.ecrFor(raw);
       const lastGame = log[log.length - 1];
       const carSum = log.reduce((a, g) => a + g.carries, 0);
       const carTeam = log.reduce((a, g) => a + g.teamCarries, 0);
@@ -493,10 +548,14 @@ export class LeagueModel {
         espn,
         projSleeper: projSleeper == null ? null : round1(projSleeper),
         projEspn: projEspn == null ? null : round1(projEspn),
+        ecrRos: ecr.ros?.[0] ?? null,
+        ecrSd: ecr.ros?.[1] ?? null,
+        ecrWeek: ecr.wk,
       });
     }
 
     this.applyMarketPrior();
+    this.applyExpertPrior();
     this.buildInjuryTimelines();
 
     // Replacement level: the best player you could realistically start after every
@@ -561,6 +620,8 @@ export class LeagueModel {
       if (!long && inj !== "Out") continue;
       let back: number | null = null;
       if (v.espn?.returnDate) back = firstWeekOnOrAfter(v.p.team, v.espn.returnDate);
+      // ESPN updates faster than Sleeper: an "Out" player ESPN expects back for this week's game isn't out.
+      if (!long && back != null && back <= this.week) continue;
       if (back == null) back = this.week + (long ? 4 : 1);
       back = Math.max(back, this.week + 1);
       this.returnWeek.set(v.p.id, back);
@@ -585,6 +646,13 @@ export class LeagueModel {
     }
   }
 
+  /** What a player was projected to score before a past week (Sleeper's pre-game projection, league scoring). */
+  pastProjection(id: string, week: number): number | null {
+    const wk = this.extras.projHistory?.find((x) => x.week === week);
+    const line = wk?.lines[id];
+    return line ? round1(scoreLine(line.s, this.scoring)) : null;
+  }
+
   // ---------- weekly expectation ----------
 
   /** Expected points for a player in a given week: value x matchup, zero on bye or out. */
@@ -603,15 +671,201 @@ export class LeagueModel {
       const long = inj != null && LONG_TERM.has(inj);
       if (week === back) mult = long ? 0.75 : 0.85;
       else if (week === back + 1 && long) mult = 0.9;
-    } else {
-      if (inj === "Doubtful" && ahead === 0) mult = 0.25;
-      if (inj === "Questionable" && ahead === 0) mult = 0.85;
+    } else if (ahead === 0 && v.p.pos !== "DEF") {
+      // Learned chance to play from the designation, practice reports and news.
+      mult = this.playChance(id).p;
     }
     const shift = this.roleShift.get(id);
     if (shift && week >= shift.fromWeek) mult *= shift.mult;
     let base = v.valuePg;
-    if (ahead === 0 && v.projNext != null && v.projNext > 0) base = 0.6 * v.projNext + 0.4 * v.valuePg;
+    if (ahead === 0 && v.projNext != null && v.projNext > 0) {
+      // Projections react to depth-chart news within hours; lean on them harder when a teammate
+      // at the same position is unlikely to play (his work has to go somewhere).
+      const w = this.teammateOut(id) ? 0.85 : v.ecrWeek != null ? 0.55 : 0.6;
+      base = w * v.projNext + (1 - w) * v.valuePg;
+      // Expert consensus for this exact week, when it's current, as a third opinion.
+      if (v.ecrWeek != null) base = 0.85 * base + 0.15 * this.weeklyRankPoints(v.p.pos, v.ecrWeek);
+    }
     return base * mult * this.matchupFactor(v.p.pos, g.opp) * this.vegasFactor(v.p.pos, g, week);
+  }
+
+  /** True when a better teammate at the same position is unlikely to play this week. */
+  private tmOutCache = new Map<string, boolean>();
+  private teammateOut(id: string): boolean {
+    const hit = this.tmOutCache.get(id);
+    if (hit != null) return hit;
+    const r = this.computeTeammateOut(id);
+    this.tmOutCache.set(id, r);
+    return r;
+  }
+
+  private computeTeammateOut(id: string): boolean {
+    const v = this.views.get(id);
+    if (!v || !v.p.team || !["RB", "WR", "TE"].includes(v.p.pos)) return false;
+    for (const t of this.views.values()) {
+      if (t.p.id === id || t.p.team !== v.p.team || t.p.pos !== v.p.pos || t.valuePg <= v.valuePg) continue;
+      if (t.valuePg < 6) continue;
+      const out = (this.returnWeek.get(t.p.id) ?? 0) > this.week || this.playChance(t.p.id).p < 0.3;
+      if (out) return true;
+    }
+    return false;
+  }
+
+  private rankPtsCache = new Map<string, number[]>();
+  /** Points a given weekly positional rank usually means this week (from this week's projections). */
+  private weeklyRankPoints(pos: Position, rank: number): number {
+    let vals = this.rankPtsCache.get(pos);
+    if (!vals) {
+      vals = [...this.views.values()]
+        .filter((v) => v.p.pos === pos && v.projNext != null && v.projNext > 0)
+        .map((v) => v.projNext!)
+        .sort((a, b) => b - a);
+      this.rankPtsCache.set(pos, vals);
+    }
+    if (!vals.length) return 0;
+    const i = Math.max(0, Math.min(vals.length - 1, Math.round(rank) - 1));
+    return vals[i];
+  }
+
+  /**
+   * Chance a player suits up for his next game. Uses the model learned from past seasons'
+   * official injury reports (designation, last practice, missed last game, injury type,
+   * position), then this week's evidence: day-by-day practice reports, ESPN's live injury
+   * notes (practice participation, "expected to play", "ruled out", game-time decision),
+   * and once the game starts, whether he actually logged stats.
+   */
+  playChance(id: string): PlayChance {
+    const hit = this.playCache.get(id);
+    if (hit) return hit;
+    const v = this.views.get(id);
+    const res = this.computePlayChance(v);
+    this.playCache.set(id, res);
+    return res;
+  }
+
+  private computePlayChance(v: PlayerView | undefined): PlayChance {
+    const base: PlayChance = { p: 0.98, status: null, official: false, practice: [], injury: null, missedLast: false, note: null, why: "No injury designation." };
+    if (!v || !v.p.team) return { ...base, p: 0, why: "Not on an NFL team." };
+    const g = this.gameFor(v.p.team, this.week);
+    if (!g) return { ...base, p: 0, why: "Bye week." };
+    const kick = new Date(g.game.kickoff).getTime();
+    const now = Date.now();
+    // Game already started: the box score answers the question.
+    if (now > kick + 20 * 60 * 1000) {
+      const played = v.log.some((x) => x.week === this.week);
+      if (played) return { ...base, p: 1, official: true, why: "Active: he has stats in this game." };
+      if (now > kick + 4.5 * 3600 * 1000) return { ...base, p: 0, official: true, why: "Did not play in this game." };
+    }
+    const calib = this.nfl?.calib?.play ?? DEFAULT_PLAY;
+    const status = v.p.injury;
+    const e = v.espn;
+    const injury = v.p.injuryPart ?? v.adv?.prac?.inj ?? e?.body ?? null;
+
+    // Evidence window: anything after his team's previous game.
+    let prevKick = 0;
+    for (let w = this.week - 1; w >= 1; w--) {
+      const pg = this.gameFor(v.p.team, w);
+      if (pg) {
+        prevKick = new Date(pg.game.kickoff).getTime();
+        break;
+      }
+    }
+    const missedLast = (() => {
+      for (let w = this.week - 1; w >= 1; w--) {
+        if (!this.gameFor(v.p.team, w)) continue; // skip byes
+        return v.log.length > 0 && !v.log.some((x) => x.week === w);
+      }
+      return false;
+    })();
+
+    // Practice participation this week: War Room's daily log, ESPN notes, and the latest nflverse row.
+    const days = new Map<string, "DNP" | "LP" | "FP">();
+    const gsis = v.p.gsis ?? this.gsisBySleeper.get(v.p.id);
+    const log = this.nfl?.pracLog;
+    if (log && log.w === this.week && gsis && log.p[gsis]) for (const [d, st] of Object.entries(log.p[gsis])) days.set(d, st);
+    const eDate = e?.date ? new Date(e.date).getTime() : 0;
+    const fresh = e && eDate > prevKick && now - eDate < 8 * 86_400_000;
+    const news = fresh && e?.short ? parseInjuryNote(e.short) : null;
+    if (news) for (const d of news.days) days.set(d.day, d.st);
+    const pr = v.adv?.prac;
+    const prThisWeek = pr && pr.w === this.week ? pr : null;
+    if (prThisWeek?.st && !days.size) days.set("Latest", prThisWeek.st);
+    const practice = [...days.entries()].map(([day, st]) => ({ day, st })).sort((a, b) => DAY_ORDER.indexOf(a.day) - DAY_ORDER.indexOf(b.day));
+    const last = practice.length ? practice[practice.length - 1].st : null;
+
+    // Is the final game-status report out? (nflverse game status, or ESPN noting the designation.)
+    const official = !!(prThisWeek?.rep) || !!(news && (news.listed || news.ruledOut) && kick - eDate < 3 * 86_400_000);
+    const desig = prThisWeek?.rep ?? (news?.ruledOut ? "Out" : status);
+    const hoursToKick = (kick - now) / 3_600_000;
+
+    let p: number;
+    const parts: string[] = [];
+    if (status && LONG_TERM.has(status)) {
+      const back = e?.returnDate ? new Date(e.returnDate).getTime() : null;
+      p = back != null && back <= kick ? 0.25 : 0.01;
+      parts.push(`${status === "IR" ? "On injured reserve" : status === "PUP" ? "On PUP" : status === "Sus" ? "Suspended" : "Not active"}`);
+    } else if (news?.ruledOut || desig === "Out") {
+      const back = e?.returnDate ? new Date(e.returnDate).getTime() : null;
+      p = official || news?.ruledOut ? calib.rates.Out?.all ?? 0.003 : back != null && back <= kick ? 0.45 : 0.06;
+      parts.push(news?.ruledOut ? "Ruled out" : official ? "Officially out" : "Listed out");
+    } else if (desig === "Doubtful") {
+      p = official ? calib.rates.Doubtful?.[last ?? "all"] ?? calib.rates.Doubtful?.all ?? 0.03 : 0.12;
+      parts.push("Doubtful");
+    } else if (!desig && /rest|not injury|personal/i.test(injury ?? "") && !missedLast) {
+      p = 0.96;
+      parts.push("Rest or personal day, not an injury");
+    } else if (desig === "Questionable" || (last && last !== "FP") || (missedLast && !!injury)) {
+      const q = calib.q ?? DEFAULT_PLAY.q!;
+      const grp = injuryGroup(injury);
+      let z =
+        q.intercept +
+        (last === "DNP" ? q.dnp : last === "FP" ? q.fp : 0) +
+        (missedLast ? q.prevOut : 0) +
+        (q[grp] ?? 0) +
+        (v.p.pos === "QB" || v.p.pos === "RB" || v.p.pos === "TE" ? q[v.p.pos] ?? 0 : 0);
+      if (desig !== "Questionable") {
+        // No designation (yet). After the final report that usually means he's fine.
+        if (official) z = logit(calib.rates.None?.[last ?? "all"] ?? 0.97);
+        else z += 0.6;
+      }
+      let modelP = 1 / (1 + Math.exp(-z));
+      if (!official) {
+        // Before the final report, practice so far is only part of the story: shrink toward typical outcomes.
+        const known = practice.length ? Math.min(1, 0.45 + 0.2 * practice.length) : 0.3;
+        const prior = missedLast ? 0.45 : desig === "Questionable" ? 0.66 : 0.85;
+        modelP = known * modelP + (1 - known) * prior;
+      }
+      p = modelP;
+      parts.push(desig === "Questionable" ? (official ? "Questionable" : "Questionable so far") : "On the practice report");
+    } else {
+      p = calib.rates.None?.[last ?? "FP"] ?? 0.98;
+      if (last === "FP") parts.push("Full practice");
+    }
+    if (news) {
+      if (news.expected) {
+        const odds = (p / (1 - p)) * 4;
+        p = Math.max(0.85, odds / (1 + odds));
+      }
+      if (news.gtd) p = 0.5 * p + 0.5 * 0.55;
+      if (news.doubtful && !news.questionable) p = Math.min(p, 0.2);
+    }
+    p = Math.max(0.01, Math.min(0.99, p));
+    if (injury) parts[0] = `${parts[0] ?? "Injury"} (${injury.toLowerCase()})`;
+    if (practice.length) parts.push(practice.map((x) => `${x.st === "DNP" ? "no practice" : x.st === "LP" ? "limited" : "full"} ${x.day === "Latest" ? "on the latest report" : x.day}`).join(", "));
+    if (missedLast) parts.push("missed his last game");
+    if (news?.expected) parts.push("news says he's expected to play");
+    if (news?.gtd) parts.push("game-time decision");
+    if (!official && hoursToKick > 0 && status) parts.push("final status not out yet");
+    return {
+      p: Math.round(p * 100) / 100,
+      status: desig ?? null,
+      official,
+      practice,
+      injury,
+      missedLast,
+      note: fresh ? e?.short ?? null : null,
+      why: parts.filter(Boolean).join(", ") + ".",
+    };
   }
 
   remainingWeeks(): number[] {
@@ -676,6 +930,46 @@ export class LeagueModel {
               : v.games >= 2
                 ? 0.3
                 : 0.5; // less data = lean on the market more
+        v.valuePg = round1(Math.max(0, (1 - w) * v.valuePg + w * implied));
+      }
+    }
+  }
+
+  /**
+   * FantasyPros rest-of-season expert consensus (dozens of analysts) as a second prior. Ranks map
+   * to points per game by position through log(rank), fit on this league's own numbers, then
+   * blend in with a learned weight (scripts/calibrate.py) or a sensible default. This is what
+   * keeps rest-of-season values from swinging on one or two big weeks.
+   */
+  private applyExpertPrior() {
+    if (!this.nfl?.ecr) return;
+    for (const pos of ["QB", "RB", "WR", "TE", "K", "DEF"] as Position[]) {
+      const rows = [...this.views.values()].filter(
+        (v) => v.p.pos === pos && v.ecrRos != null && v.games >= 2 && v.valuePg > 0 && !(v.p.injury && (LONG_TERM.has(v.p.injury) || v.p.injury === "Out"))
+      );
+      if (rows.length < 8) continue;
+      const xs = rows.map((v) => Math.log(Math.max(1, v.ecrRos!)));
+      const ys = rows.map((v) => v.valuePg);
+      const mx = avg(xs);
+      const my = avg(ys);
+      let num = 0;
+      let den = 0;
+      xs.forEach((x, i) => {
+        num += (x - mx) * (ys[i] - my);
+        den += (x - mx) ** 2;
+      });
+      if (den <= 0) continue;
+      const b = num / den;
+      if (b >= 0) continue; // better rank must mean more points
+      const a = my - b * mx;
+      const learned = this.nfl.calib?.ecr?.[pos];
+      for (const v of this.views.values()) {
+        if (v.p.pos !== pos || v.ecrRos == null) continue;
+        const implied = Math.max(0, a + b * Math.log(Math.max(1, v.ecrRos)));
+        v.ecrPg = round1(implied);
+        let w = learned != null ? Math.min(0.6, v.games >= 2 ? learned : learned * 1.5) : v.games >= 4 ? 0.35 : v.games >= 2 ? 0.4 : 0.55;
+        // Expert ranks already discount missed games; our weekly values handle that separately.
+        if (v.p.injury && (LONG_TERM.has(v.p.injury) || v.p.injury === "Out")) w *= 0.5;
         v.valuePg = round1(Math.max(0, (1 - w) * v.valuePg + w * implied));
       }
     }
@@ -769,11 +1063,28 @@ export class LeagueModel {
     return { team: t, lineup: lu, startersByPos: byPos };
   }
 
-  /** Rank each team's starter strength by position (1 = strongest). */
+  private needsCache: ReturnType<LeagueModel["computeNeeds"]> | null = null;
+
+  /**
+   * Rank each team's starters by position for the rest of the season (1 = strongest), and call
+   * a position a need only when the starters there are clearly below the league's typical team.
+   * Values are season-long per-game values blended with FantasyPros rest-of-season consensus and
+   * trade-market values, with long injuries discounted, so one big week doesn't flip a need.
+   */
   needsTable() {
+    if (!this.needsCache) this.needsCache = this.computeNeeds();
+    return this.needsCache;
+  }
+
+  teamNeeds(rosterId: number): Position[] {
+    return this.needsTable().find((n) => n.team.rosterId === rosterId)?.needs ?? [];
+  }
+
+  private computeNeeds() {
     const profiles = this.teams.map((t) => this.teamProfile(t.rosterId));
     const positions: Position[] = ["QB", "RB", "WR", "TE"];
     const ranks = new Map<number, Record<string, number>>();
+    const median: Record<string, number> = {};
     for (const pos of positions) {
       const sorted = [...profiles].sort((a, b) => (b.startersByPos[pos] ?? 0) - (a.startersByPos[pos] ?? 0));
       sorted.forEach((pr, i) => {
@@ -781,23 +1092,33 @@ export class LeagueModel {
         r[pos] = i + 1;
         ranks.set(pr.team.rosterId, r);
       });
+      const vals = sorted.map((pr) => pr.startersByPos[pos] ?? 0);
+      median[pos] = vals[Math.floor(vals.length / 2)] ?? 0;
     }
     return profiles.map((pr) => {
       const r = ranks.get(pr.team.rosterId)!;
+      // Deficit vs the median team, as a share of a typical starter group there.
+      const gap: Record<string, number> = {};
+      for (const pos of positions) gap[pos] = median[pos] > 0 ? (median[pos] - (pr.startersByPos[pos] ?? 0)) / median[pos] : 0;
+      const needs = positions
+        .filter((pos) => gap[pos] > 0.06 && r[pos] > this.teams.length / 2)
+        .sort((a, b) => gap[b] - gap[a])
+        .slice(0, 2);
+      // Surplus: bench players who would start for the median team at that position.
       const benchStrength: Record<string, number> = {};
       for (const id of pr.lineup.bench) {
         const v = this.views.get(id);
         if (!v || !["RB", "WR", "TE", "QB"].includes(v.p.pos)) continue;
-        if (v.vorp > 0) benchStrength[v.p.pos] = (benchStrength[v.p.pos] ?? 0) + 1;
+        const slotsAtPos = pr.lineup.filled.filter((f) => f.id && this.players[f.id]?.pos === v.p.pos).length || 1;
+        if (v.valuePg >= (median[v.p.pos] / slotsAtPos) * 0.8 && !(v.p.injury && LONG_TERM.has(v.p.injury)))
+          benchStrength[v.p.pos] = (benchStrength[v.p.pos] ?? 0) + 1;
       }
-      const sortedNeeds = positions.slice().sort((a, b) => r[b] - r[a]);
       return {
         team: pr.team,
         ranks: r,
-        needs: sortedNeeds.filter((p) => r[p] > this.teams.length * 0.6).slice(0, 2),
-        surplus: Object.entries(benchStrength)
-          .filter(([, c]) => c > 0)
-          .map(([p]) => p),
+        gap,
+        needs,
+        surplus: Object.keys(benchStrength).filter((p) => !needs.includes(p as Position)),
         weekly: round1(pr.lineup.total),
       };
     });
@@ -829,7 +1150,20 @@ export class LeagueModel {
         list = list.filter((id) => id !== bench[0]);
       }
       while (list.length < this.rosterLimit) {
-        const pick = fa.find((v) => !list.includes(v.p.id) && !adds.includes(v.p.id));
+        // The open spot goes to the free agent who helps this lineup most (a third QB helps nobody).
+        const base = this.lineup(list, (id) => this.views.get(id)?.valuePg ?? 0).total;
+        let pick: PlayerView | null = null;
+        let bestGain = -1;
+        for (const v of fa.slice(0, 25)) {
+          if (list.includes(v.p.id) || adds.includes(v.p.id)) continue;
+          // Ties (nobody would start) go to a flex-eligible depth piece, not a third QB.
+          const depth = ["RB", "WR", "TE"].includes(v.p.pos) ? 0.05 : 0;
+          const gain = this.lineup([...list, v.p.id], (id) => this.views.get(id)?.valuePg ?? 0).total - base + depth + v.rosPoints / 10000;
+          if (gain > bestGain) {
+            bestGain = gain;
+            pick = v;
+          }
+        }
         if (!pick) break;
         adds.push(pick.p.id);
         list.push(pick.p.id);
@@ -874,13 +1208,34 @@ export class LeagueModel {
     const hasMarket = giveVals.some((v) => v > 0) && getVals.some((v) => v > 0);
     const marketRatio = hasMarket ? adj(giveVals) / Math.max(1, adj(getVals)) : null; // >1 = you give more value
 
+    // Expert check: FantasyPros rest-of-season consensus, as points over a replacement starter
+    // for the weeks each player is expected to play, with the same star premium.
+    const share = (id: string) => {
+      const back = this.returnWeek.get(id);
+      return back == null || !weeks.length ? 1 : weeks.filter((w) => w >= back).length / weeks.length;
+    };
+    const xv = (ids: string[]) =>
+      ids.map((id) => {
+        const v = this.views.get(id);
+        if (!v || v.ecrPg == null) return 0;
+        return Math.max(0, v.ecrPg - (this.replacement.get(v.p.pos) ?? 0)) * share(id);
+      });
+    const giveX = xv(give);
+    const getX = xv(get);
+    const hasExpert = giveX.some((v) => v > 0) && getX.some((v) => v > 0);
+    const adjX = (vals: number[]) => vals.reduce((a, v) => a + Math.pow(Math.max(0, v), 1.3), 0);
+    const expertRatio = hasExpert ? adjX(giveX) / Math.max(0.01, adjX(getX)) : null;
+    // Consensus value ratio: both outside views agree more often than either alone.
+    const consensusRatio =
+      marketRatio != null && expertRatio != null ? Math.sqrt(marketRatio * expertRatio) : marketRatio ?? expertRatio;
+
     // Verdict: average weekly change, with playoff weeks counting 1.5x because they decide titles.
     const weight = (w: number) => (w >= this.playoffStart ? 1.5 : 1);
     const wSum = perWeek.reduce((a, x) => a + weight(x.week), 0) || 1;
     const perWk = perWeek.reduce((a, x) => a + x.me * weight(x.week), 0) / wSum;
     const scale = ["Loss for you", "Slight loss for you", "Even", "Slight win for you", "Win for you"];
     let level = perWk > 1.5 ? 4 : perWk > 0.5 ? 3 : perWk >= -0.5 ? 2 : perWk >= -1.5 ? 1 : 0;
-    const overpay = marketRatio != null && marketRatio > 1.4;
+    const overpay = consensusRatio != null && consensusRatio > 1.4;
     if (overpay && level >= 3) level -= 1; // you could likely get the same upgrade for less
     const verdict = scale[level];
 
@@ -908,7 +1263,8 @@ export class LeagueModel {
         reasons.push(`Your ${p} depth after: ${left.map((v) => v.p.name).join(", ") || "none"}.`);
       }
     }
-    if (myFit.adds.length) reasons.push(`The open roster spot goes to the best free agent (${nm(myFit.adds)}), which is counted.`);
+    if (myFit.adds.length)
+      reasons.push(`The open roster spot gets filled from waivers (best fit: ${nm(myFit.adds)}). That depth is counted.`);
     if (myFit.drops.length) reasons.push(`You'd have to drop ${nm(myFit.drops)} to fit everyone.`);
     if (theirFit.drops.length) flags.push(`They would have to drop ${nm(theirFit.drops)}.`);
     if (give.length !== get.length && best)
@@ -948,14 +1304,71 @@ export class LeagueModel {
         else flags.push(`${v.p.name}'s role likely shrinks from week ${shift.fromWeek} when ${shift.by} returns (counted in the numbers).`);
       }
     }
-    if (overpay) flags.push("By market value you're giving up a lot more than you get. You could probably land the same upgrade for less.");
-    if (marketRatio != null && marketRatio < 0.75) flags.push("By market value you're getting a lot more than you give. Expect pushback.");
+    if (overpay) flags.push("By trade market and expert rankings you're giving up a lot more than you get. You could probably land the same upgrade for less.");
+    if (consensusRatio != null && consensusRatio < 0.75) flags.push("By trade market and expert rankings you're getting a lot more than you give. Expect pushback.");
+    if (marketRatio != null && expertRatio != null && (marketRatio - 1) * (expertRatio - 1) < 0 && Math.abs(marketRatio - expertRatio) > 0.35)
+      flags.push(
+        `The trade market and the experts disagree here: market says ${marketRatio > 1 ? "you overpay" : "you win"}, FantasyPros rankings say ${expertRatio > 1 ? "you overpay" : "you win"}.`
+      );
+
+    // What an experienced manager would check before hitting send.
+    const myStartersAfter = this.lineup(myAfter, (id) => this.views.get(id)?.valuePg ?? 0).filled.map((f) => f.id).filter((x): x is string => !!x);
+    for (const id of get) {
+      const v = this.views.get(id);
+      if (!v) continue;
+      if (v.bye && v.bye >= this.week) {
+        const same = myStartersAfter.filter((o) => o !== id && this.views.get(o)?.bye === v.bye).length;
+        if (same >= 2 && myStartersAfter.includes(id)) flags.push(`${v.p.name}'s bye (week ${v.bye}) stacks with ${same} of your other starters.`);
+      }
+      if (v.p.pos === "RB" && v.carryShare != null && v.carryShare < 0.45 && v.games >= 2 && (v.adv?.l3?.snap ?? v.snapShare ?? 0) < 0.6)
+        flags.push(`${v.p.name} is in a committee (${Math.round(v.carryShare * 100)}% of team carries). Lower floor.`);
+      if (v.p.pos === "RB" && (v.p.age ?? 0) >= 28) flags.push(`${v.p.name} is ${v.p.age}. Running backs this age fade late in the season more often.`);
+      const env = this.teamEnv(v.p.team);
+      if (env?.rk?.ppg != null && env.rk.ppg >= 26) flags.push(`${v.p.team}'s offense ranks ${env.rk.ppg}th in points per game, which caps his ceiling.`);
+      if ((v.p.yearsExp ?? 1) === 0 && v.log.length >= 3) {
+        const snaps = v.log.slice(-3).map((g) => (g.teamSnaps ? g.snaps / g.teamSnaps : 0));
+        if (snaps[snaps.length - 1] > snaps[0] + 0.1) reasons.push(`${v.p.name} is a rookie whose snaps are climbing, so there's upside the numbers haven't caught yet.`);
+      }
+    }
+    // Playoff schedule (weeks that decide titles).
+    const pWeeks = weeks.filter((w) => w >= this.playoffStart);
+    if (pWeeks.length) {
+      const sched = (id: string) => {
+        const v = this.views.get(id);
+        if (!v || ["K", "DEF"].includes(v.p.pos)) return null;
+        const fs = pWeeks.map((w) => {
+          const g = this.gameFor(v.p.team, w);
+          return g ? this.matchupFactor(v.p.pos, g.opp) : 0;
+        });
+        if (fs.some((f) => f === 0)) return { v, label: `bye in week ${pWeeks[fs.indexOf(0)]}` };
+        const m = avg(fs);
+        return m >= 1.06 ? { v, label: "an easy playoff schedule" } : m <= 0.94 ? { v, label: "a tough playoff schedule" } : null;
+      };
+      for (const id of [...give, ...get]) {
+        const r = sched(id);
+        if (r) reasons.push(`${r.v.p.name} has ${r.label} (weeks ${pWeeks[0]}-${pWeeks[pWeeks.length - 1]}).`);
+      }
+    }
+    // Where the model and the experts disagree on a player, say so.
+    for (const id of [...give, ...get]) {
+      const v = this.views.get(id);
+      if (!v || v.ecrRos == null || !["QB", "RB", "WR", "TE"].includes(v.p.pos)) continue;
+      const modelRank = [...this.views.values()].filter((o) => o.p.pos === v.p.pos && o.valuePg > v.valuePg).length + 1;
+      if (Math.abs(modelRank - v.ecrRos) >= 12 && v.games >= 3)
+        reasons.push(
+          `${v.p.name}: experts rank him ${v.p.pos}${Math.round(v.ecrRos)} rest of season, War Room's usage model has him ${v.p.pos}${modelRank}. The value above blends both.`
+        );
+    }
     if (this.tradeDeadline && this.week > this.tradeDeadline) flags.push("The trade deadline has passed in this league.");
 
-    const lineupScore = theirDelta > 5 ? 1 : theirDelta >= -3 ? 0 : theirDelta >= -12 ? -1 : -2;
+    // Would they accept? Their lineup change, how the deal looks on value, and whether it fills a need of theirs.
+    const theirPerWk = theirDelta / Math.max(1, weeks.length);
+    const lineupScore = theirPerWk > 0.4 ? 1 : theirPerWk >= -0.25 ? 0 : theirPerWk >= -1 ? -1 : -2;
     const marketScore =
-      marketRatio == null ? null : marketRatio >= 1.1 ? 1 : marketRatio >= 0.9 ? 0 : marketRatio >= 0.75 ? -1 : -2;
-    const score = marketScore == null ? lineupScore * 2 : lineupScore + marketScore;
+      consensusRatio == null ? null : consensusRatio >= 1.1 ? 1 : consensusRatio >= 0.9 ? 0 : consensusRatio >= 0.75 ? -1 : -2;
+    const theirNeeds = this.teamNeeds(partnerId);
+    const fillsNeed = give.some((id) => theirNeeds.includes(this.players[id]?.pos as Position));
+    const score = (marketScore == null ? lineupScore * 2 : lineupScore + marketScore) + (fillsNeed ? 1 : 0);
     const acceptance = score >= 1 ? "Likely" : score >= 0 ? "Coin flip" : score >= -2 ? "Unlikely" : "Very unlikely";
 
     return {
@@ -972,6 +1385,16 @@ export class LeagueModel {
       market: hasMarket
         ? { give: Math.round(giveVals.reduce((a, b) => a + b, 0)), get: Math.round(getVals.reduce((a, b) => a + b, 0)), ratio: Math.round(marketRatio! * 100) / 100 }
         : null,
+      expert: hasExpert
+        ? {
+            ratio: Math.round(expertRatio! * 100) / 100,
+            give: give.map((id) => this.views.get(id)).filter((v): v is PlayerView => !!v).map((v) => ({ name: v.p.name, rank: v.ecrRos != null ? `${v.p.pos}${Math.round(v.ecrRos)}` : "unranked" })),
+            get: get.map((id) => this.views.get(id)).filter((v): v is PlayerView => !!v).map((v) => ({ name: v.p.name, rank: v.ecrRos != null ? `${v.p.pos}${Math.round(v.ecrRos)}` : "unranked" })),
+          }
+        : null,
+      consensusRatio: consensusRatio == null ? null : Math.round(consensusRatio * 100) / 100,
+      theirPerWeekAvg: round1(theirPerWk),
+      fillsTheirNeed: fillsNeed,
       myDrops: myFit.drops,
       theirDrops: theirFit.drops,
       myAdds: myFit.adds,
@@ -984,18 +1407,30 @@ export class LeagueModel {
 
 
   /**
-   * Trade finder for one partner. Picks players on their roster who would start for you,
-   * pairs them with 1-2 of your players at a similar market value (so the offer looks fair),
-   * runs every candidate through the full simulator, and keeps deals that help your lineup
-   * without hurting theirs much. Locked players are never offered.
+   * Trade finder for one partner, built to find deals both managers would actually take:
+   * - targets players of theirs who'd start for you, preferring positions you need;
+   * - offers your players at positions they need, from your surplus first;
+   * - keeps only offers that are fair on consensus value (FantasyCalc market + FantasyPros ROS
+   *   rankings), improve your lineup for the rest of the season, and don't make theirs worse;
+   * - runs every candidate through the full week-by-week simulator (depth, byes, injuries,
+   *   schedule, playoffs). Locked players are never offered.
    */
   findTradesWith(myId: number, partnerId: number, need: Position | "ANY", locked: string[] = []) {
     const me = this.team(myId);
     const them = this.team(partnerId);
     if (!me || !them) return [];
     const skill: Position[] = ["QB", "RB", "WR", "TE"];
+    const myNeeds = this.teamNeeds(myId);
+    const theirNeeds = this.teamNeeds(partnerId);
     const wantPos = need === "ANY" ? skill : [need];
-    const mv = (id: string) => this.views.get(id)?.market?.value ?? 0;
+    // Consensus trade value (market + experts), so packages look fair before we simulate.
+    const val = (id: string) => {
+      const v = this.views.get(id);
+      if (!v) return 0;
+      const m = v.market?.value ?? 0;
+      const x = v.ecrPg != null ? Math.max(0, v.ecrPg - (this.replacement.get(v.p.pos) ?? 0)) * 900 : 0; // ~market scale
+      return m && x ? Math.sqrt(m * x) : m || x;
+    };
     const myIdeal = this.lineup(me.players, (id) => this.views.get(id)?.valuePg ?? 0);
     const weakest: Record<string, number> = {};
     for (const f of myIdeal.filled) {
@@ -1005,18 +1440,33 @@ export class LeagueModel {
     }
     const targets = them.players
       .map((id) => this.views.get(id))
-      .filter((v): v is PlayerView => !!v && wantPos.includes(v.p.pos) && mv(v.p.id) > 0)
+      .filter((v): v is PlayerView => !!v && wantPos.includes(v.p.pos) && val(v.p.id) > 0)
       .filter((v) => !(v.p.injury && LONG_TERM.has(v.p.injury) && (this.returnWeek.get(v.p.id) ?? 99) > this.playoffStart))
       .filter((v) => v.valuePg > (weakest[v.p.pos] ?? 0) * 1.05) // would actually upgrade a starting spot
-      .sort((a, b) => b.valuePg - a.valuePg)
-      .slice(0, 4);
+      .sort((a, b) => (myNeeds.includes(b.p.pos) ? 1 : 0) - (myNeeds.includes(a.p.pos) ? 1 : 0) || b.valuePg - a.valuePg)
+      .slice(0, 5);
     if (!targets.length) return [];
-    const mine = me.players.filter((id) => !locked.includes(id) && skill.includes(this.players[id]?.pos as Position) && mv(id) > 0);
+    const mine = me.players
+      .filter((id) => !locked.includes(id) && skill.includes(this.players[id]?.pos as Position) && val(id) > 0)
+      // Offer what they need first, then your bench, then everything else.
+      .sort((a, b) => {
+        const score = (id: string) =>
+          (theirNeeds.includes(this.players[id]?.pos as Position) ? 2 : 0) + (myIdeal.bench.includes(id) ? 1 : 0);
+        return score(b) - score(a);
+      })
+      .slice(0, 9);
     const packages: string[][] = [];
     for (let i = 0; i < mine.length; i++) {
       packages.push([mine[i]]);
       for (let j = i + 1; j < mine.length; j++) packages.push([mine[i], mine[j]]);
     }
+    // Their depth pieces you could take back to balance a deal where you give more.
+    const theirExtras = them.players
+      .map((id) => this.views.get(id))
+      .filter((v): v is PlayerView => !!v && skill.includes(v.p.pos) && val(v.p.id) > 0)
+      .sort((a, b) => b.valuePg - a.valuePg)
+      .slice(0, 8)
+      .map((v) => v.p.id);
     const ideas: {
       partnerId: number;
       give: string[];
@@ -1024,20 +1474,36 @@ export class LeagueModel {
       result: ReturnType<LeagueModel["evaluateTrade"]>;
       score: number;
     }[] = [];
+    const adj = (ids: string[]) => ids.reduce((a, id) => a + Math.pow(val(id), 1.3), 0);
     for (const t of targets) {
-      const tv = Math.pow(mv(t.p.id), 1.3);
-      const fits = packages
-        .filter((pk) => !pk.includes(t.p.id))
-        .map((pk) => ({ pk, ratio: pk.reduce((a, id) => a + Math.pow(mv(id), 1.3), 0) / tv }))
-        .filter((x) => x.ratio >= 0.85 && x.ratio <= 1.35)
-        .sort((a, b) => Math.abs(a.ratio - 1.05) - Math.abs(b.ratio - 1.05))
-        .slice(0, 6);
-      for (const { pk } of fits) {
-        const r = this.evaluateTrade(myId, partnerId, pk, [t.p.id]);
-        if (r.perWeekAvg < 0.3 || r.theirDelta < -8 || r.acceptance === "Very unlikely" || r.acceptance === "Unlikely") continue;
+      const gets: string[][] = [[t.p.id], ...theirExtras.filter((x) => x !== t.p.id).map((x) => [t.p.id, x])];
+      const candidates: { pk: string[]; get: string[]; ratio: number }[] = [];
+      for (const g of gets) {
+        const tv = adj(g);
+        for (const pk of packages) {
+          if (pk.some((id) => g.includes(id))) continue;
+          if (g.length === 2 && pk.length === 2) continue; // keep offers simple
+          const ratio = adj(pk) / tv;
+          if (ratio >= 0.88 && ratio <= 1.25) candidates.push({ pk, get: g, ratio });
+        }
+      }
+      candidates.sort((a, b) => Math.abs(a.ratio - 1.03) - Math.abs(b.ratio - 1.03));
+      for (const { pk, get } of candidates.slice(0, 8)) {
+        const r = this.evaluateTrade(myId, partnerId, pk, get);
+        // Both sides must come out fine for the rest of the season, and it has to look fair.
+        if (r.perWeekAvg < 0.3) continue;
+        if (r.theirPerWeekAvg < -0.25) continue;
+        if (r.consensusRatio != null && (r.consensusRatio < 0.85 || r.consensusRatio > 1.3)) continue;
+        if (r.acceptance === "Very unlikely" || r.acceptance === "Unlikely") continue;
         const playoffAvg = r.myPlayoffDelta / Math.max(1, this.lastWeek - this.playoffStart + 1);
-        const score = r.perWeekAvg + 0.5 * playoffAvg + (r.acceptance === "Likely" ? 0.6 : 0) + (r.theirDelta > 0 ? 0.3 : 0);
-        ideas.push({ partnerId, give: pk, get: [t.p.id], result: r, score });
+        const score =
+          r.perWeekAvg +
+          0.4 * playoffAvg +
+          0.5 * Math.max(0, Math.min(1.5, r.theirPerWeekAvg)) + // deals that help them too get done
+          (r.acceptance === "Likely" ? 0.5 : 0) +
+          (r.fillsTheirNeed ? 0.3 : 0) -
+          (r.consensusRatio != null ? 1.5 * Math.abs(r.consensusRatio - 1) : 0);
+        ideas.push({ partnerId, give: pk, get, result: r, score });
       }
     }
     // One best package per target keeps the list varied.
@@ -1583,11 +2049,12 @@ export class LeagueModel {
         continue;
       }
       const pr = v.adv?.prac;
-      if (pr && pr.w === week && pr.st === "DNP" && !v.p.injury && !/rest|not injury/i.test(pr.inj ?? ""))
+      if (pr && pr.w === week && pr.st === "DNP" && !v.p.injury && !/rest|not injury/i.test(pr.inj ?? "") && !(week === this.week && this.playChance(f.id).p < 0.85))
         warnings.push(`${v.p.name} did not practice (${pr.inj ?? "injury"}) on the latest report. Watch for a designation.`);
       if (pr && pr.w >= week - 1 && pr.wks >= 3 && pr.inj && !/rest|not injury/i.test(pr.inj))
         warnings.push(`${v.p.name} has been on the injury report ${pr.wks} weeks with ${pr.inj}. Recurring issue.`);
-      if (v.p.injury === "Questionable" || v.p.injury === "Doubtful") {
+      const pc = week === this.week ? this.playChance(f.id) : null;
+      if (pc && pc.p < 0.85 && !(v.p.injury && (v.p.injury === "Out" || LONG_TERM.has(v.p.injury)))) {
         const kick = new Date(g.game.kickoff).getTime();
         const eligible = f.slot in FLEX_SLOTS ? FLEX_SLOTS[f.slot] : [f.slot as Position];
         const lateBackup = lu.bench.some((id) => {
@@ -1598,8 +2065,10 @@ export class LeagueModel {
         });
         if (!lateBackup)
           warnings.push(
-            `${v.p.name} is ${v.p.injury} and you have no healthy bench backup playing at the same time or later. If he is ruled out late, you cannot swap him.`
+            `${v.p.name} has a ${Math.round(pc.p * 100)}% chance to play and you have no healthy bench backup playing at the same time or later. If he is ruled out late, you cannot swap him.`
           );
+        else if (pc.p < 0.6)
+          warnings.push(`${v.p.name} is only ${Math.round(pc.p * 100)}% to play (${pc.why.replace(/\.$/, "")}). Watch the final report.`);
       }
     }
     return { lineup: lu, rows, warnings };
@@ -1616,6 +2085,79 @@ function normCdf(z: number) {
   const d = 0.3989423 * Math.exp((-z * z) / 2);
   const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
   return z > 0 ? 1 - p : p;
+}
+
+/** Fallback chance-to-play model (fit on 2023-26 injury reports) until the nightly calibration ships one. */
+const DEFAULT_PLAY: PlayCalib = {
+  n: 3252,
+  rates: {
+    Out: { all: 0.002, DNP: 0, LP: 0, FP: 0.001 },
+    Doubtful: { all: 0.021, DNP: 0.003, LP: 0.037, FP: 0.011 },
+    Questionable: { all: 0.677, DNP: 0.517, LP: 0.67, FP: 0.865 },
+    None: { all: 0.967, DNP: 0.84, LP: 0.979, FP: 0.977 },
+  },
+  q: { intercept: 1.078, dnp: -0.863, fp: 1.204, prevOut: -0.634, soft: -0.369, lower: 0.107, concussion: -0.387, nonInjury: 0.105, QB: -1.265, RB: 0.082, TE: 0.084 },
+};
+
+const DAY_ORDER = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun", "Latest"];
+
+function logit(p: number) {
+  const x = Math.max(0.001, Math.min(0.999, p));
+  return Math.log(x / (1 - x));
+}
+
+export function injuryGroup(s: string | null | undefined): "soft" | "concussion" | "lower" | "nonInjury" | "upper" | "none" {
+  const t = (s ?? "").toLowerCase();
+  if (!t) return "none";
+  if (/hamstring|calf|groin|quad|pectoral|oblique|abdom|adductor/.test(t)) return "soft";
+  if (/concussion|head/.test(t)) return "concussion";
+  if (/ankle|knee|foot|toe|hip|achilles|heel|shin|fibula|tibia/.test(t)) return "lower";
+  if (/illness|not injury|personal|rest/.test(t)) return "nonInjury";
+  return "upper";
+}
+
+const WEEKDAY: Record<string, string> = { monday: "Mon", tuesday: "Tue", wednesday: "Wed", thursday: "Thu", friday: "Fri", saturday: "Sat", sunday: "Sun" };
+
+/** Reads an ESPN/Rotowire injury note for practice participation by day and status language. */
+export function parseInjuryNote(text: string) {
+  const out = {
+    days: [] as { day: string; st: "DNP" | "LP" | "FP" }[],
+    ruledOut: false,
+    expected: false,
+    gtd: false,
+    doubtful: false,
+    questionable: false,
+    listed: false,
+  };
+  const t = text.replace(/\s+/g, " ");
+  for (const sentence of t.split(/(?<=[.!?])\s+/)) {
+    const s = sentence.toLowerCase();
+    let st: "DNP" | "LP" | "FP" | null = null;
+    if (/(didn't|did not|wasn't able to|was unable to|unable to|sat out|held out of|absent from|not seen at|missed)\s+(\w+\s+)?(practice|practicing|session|workout)|did not participate|non-participant|\bdnp\b/.test(s))
+      st = "DNP";
+    else if (/\blimited\b/.test(s)) st = "LP";
+    else if (/practiced fully|full participant|full participation|fully participated|full practice|practiced in full|without limitations|no limitations/.test(s)) st = "FP";
+    if (st) {
+      const m = s.match(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/);
+      out.days.push({ day: m ? WEEKDAY[m[1]] : "Latest", st });
+    }
+    if (/\b(ruled out|won't play|will not play|will miss|won't suit up|is out for|has been ruled|inactive for|placed on (injured reserve|ir)|out for (sunday|monday|thursday|saturday))\b/.test(s) && !/\bnot (been )?ruled out\b/.test(s))
+      out.ruledOut = true;
+    const negated = /\b(not|n't|isn't|unlikely)\s+(expected|likely|going|set)\s+to\s+(play|suit up|go)\b|\bunlikely to play\b/.test(s);
+    if (negated) out.doubtful = true;
+    else if (/(expected to play|will play|on track to play|good to go|has been cleared|will suit up|plans to play|is active|no injury designation|without an injury designation|removed from the injury report|not listed on the injury report|off the injury report)/.test(s))
+      out.expected = true;
+    if (/game-time decision|gametime decision|game time decision/.test(s)) out.gtd = true;
+    if (/\bdoubtful\b/.test(s)) out.doubtful = true;
+    if (/\bquestionable\b/.test(s)) out.questionable = true;
+    if (/(listed as|designated|carries a|carrying a|given a|status of|officially)\s+(questionable|doubtful|out)|(questionable|doubtful) for (sunday|monday|thursday|saturday|the game|week)/.test(s))
+      out.listed = true;
+  }
+  // Keep one status per day (the last mentioned wins).
+  const byDay = new Map<string, "DNP" | "LP" | "FP">();
+  for (const d of out.days) byDay.set(d.day, d.st);
+  out.days = [...byDay.entries()].map(([day, st]) => ({ day, st }));
+  return out;
 }
 
 function normName(n: string) {

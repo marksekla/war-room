@@ -9,6 +9,8 @@ Sync any Sleeper league and get:
 - **Start/Sit compare** – 2-3 players side by side with floor-to-ceiling ranges, matchup, Vegas, injuries on both lines, weather, and a call that leans safe when you're favored and swings big when you're the underdog.
 - **Streamers and FAAB** – one-week QB/TE/K/DEF pickups by matchup, and suggested FAAB bids tuned to how your league bids.
 - **Player search** – find anyone from the header and open his card.
+- **Are they playing?** – every fantasy-relevant player on the injury report with his chance to suit up, injury, matchup and day-by-day practice report. The chance comes from a model trained on recent seasons' official injury reports (designation, last practice, missed last game, injury type, position) and updates with this week's practice reports and ESPN injury notes.
+- **Expert consensus** – FantasyPros rest-of-season and weekly consensus rankings (free DynastyProcess mirror) feed player values, team needs, the trade check and start/sit.
 - **Playoff odds** – simulates the rest of the season thousands of times on your league's real schedule, then the bracket: every team's chance to make the playoffs, get a bye and win the title. The trade simulator shows how a deal moves your odds.
 - **Saved AI chats** – conversations stay after a refresh (stored in your browser only).
 - **Command dashboard** – this week's head-to-head with win odds, a live league wire of every add, drop and trade, your roster with usage (snap %, target share, carry share), next matchup, value over replacement, rest-of-season points, a week-by-week outlook to the championship, standings, and every team's needs.
@@ -69,13 +71,15 @@ In **Settings**, click **Load models** to pick from the models your key can use.
 
 ## How the numbers work
 
-- **Value per game** blends this week's projection (Sleeper and ESPN averaged) with recent and season scoring, using your league's scoring, with a small pull toward expected fantasy points (xFP) for RB/WR/TE because opportunity is more stable than efficiency.
+- **Value per game** (rest of season) blends projections with this week's matchup and Vegas stripped back out, season and recent scoring and expected fantasy points (xFP), then pulls toward two outside views: FantasyPros rest-of-season expert consensus and FantasyCalc trade-market values. So one big week can't flip a player's value or a team's needs.
+- **Chance to play** multiplies this week's expected points, so a 55% questionable player counts as 55% of his projection.
 - **VORP** (value over replacement) is points per game above a waiver-level starter at that position. This is how positional scarcity shows up: in a league where good RBs are scarce, RB VORP rises.
 - **Expected points** for a week = value × a damped matchup factor (points the opponent allows to that position this season), set to zero on byes and for players ruled out.
 - **Trade and waiver results** re-optimize your lineup every remaining week and sum the difference, so byes, injuries and roster spots all count.
 - **Win probability** compares both teams' best projected lineups with a normal approximation (team weekly scores vary about 22%).
 - **Trenches**: defenders and O-linemen who played 60%+ of snaps over their last 3 games count as starters. If one is ruled out or questionable (ESPN, then the official report), it shows on the matchup.
-- **Trade acceptance** combines how the other team's lineup changes with FantasyCalc market values (built from real trades), since that is how most managers judge an offer.
+- **Trade fairness and acceptance** combine how the other team's lineup changes, a value check from FantasyCalc market values and FantasyPros expert ranks (with a star premium), and whether the deal fills one of their needs. The trade finder only suggests deals that improve your lineup, don't hurt theirs, and are fair on that value check.
+- **Team needs** compare each team's rest-of-season starters to the league's typical team at each position; a need is a clear gap, not just a low rank.
 - **Injury status** uses Sleeper plus ESPN's injury feed (refreshed every 15 minutes); the more serious recent designation wins. Starters who missed practice or have been on the report 3+ weeks get flagged.
 - **Team environment**: pass rate over expected and neutral pass rate (1st/2nd down, win probability 20-80%, outside the last 2 minutes of a half), seconds per play in neutral situations, red zone trips, the QB's share of carries inside the 5, and EPA per play allowed on defense. League-average PROE is about -2%.
 
@@ -91,6 +95,8 @@ When a new NFL week finishes, the nightly job (`scripts/calibrate.py`) replays l
 - how often starters at each position miss the next game, which drives depth value in trades
 - how much Vegas implied team totals and defense-vs-position should move each position's projection
 - how much FantasyCalc market value should count (the job saves a market snapshot before every week, so this one starts learning after a few weeks of snapshots and keeps improving)
+- how much FantasyPros expert rankings should count (same idea: weekly snapshots, learned once enough weeks exist)
+- each player's chance to play from his injury designation and practice report (refit on the last three seasons plus this one)
 
 It also tests itself honestly (trained on last season, scored on this season's games) and shows War Room's average miss next to Sleeper's and ESPN's in **Settings → Data sources**.
 
@@ -109,6 +115,8 @@ It also tests itself honestly (trained on last season, scored on this season's g
 | First-read targets | FTN Data via nflverse | twice daily |
 | Expected fantasy points (xFP) | [ffopportunity](https://github.com/ffverse/ffopportunity) | twice daily |
 | Player ID matching | [DynastyProcess](https://github.com/dynastyprocess/data) | twice daily |
+| Expert consensus rankings (FantasyPros ROS + weekly, PPR) | [DynastyProcess mirror](https://github.com/dynastyprocess/data) | weekly (checked twice daily) |
+| Past-week projections (for projected vs actual) | Sleeper | cached 12 h |
 | Trade market values | [FantasyCalc](https://fantasycalc.com) | 6 h |
 | Kickoff weather | [Open-Meteo](https://open-meteo.com) | 1 h |
 | Breaking news | Your AI provider's web search | live |

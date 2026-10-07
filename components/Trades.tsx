@@ -95,7 +95,7 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
 
       {profile && <p className="-mt-3 text-xs text-slate-400">{profile.summary}</p>}
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
         <RosterPicker
           title={`You send (${me.teamName})`}
           players={sortRoster(me.players)}
@@ -138,7 +138,12 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
               <Big
                 label="They accept?"
                 value={result.acceptance}
-                sub={<>Their lineup: <Delta value={result.theirDelta} suffix=" pts" /></>}
+                sub={
+                  <>
+                    Their lineup: <Delta value={result.theirPerWeekAvg} suffix=" / wk" />
+                    {result.fillsTheirNeed ? " · fills a need" : ""}
+                  </>
+                }
                 tone={result.acceptance === "Likely" ? "lime" : result.acceptance === "Coin flip" ? "cyan" : "rose"}
               />
             </div>
@@ -160,19 +165,52 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
               </div>
             </div>
 
-            {result.market && (
-              <div className="rounded-lg border border-white/10 bg-black/30 p-3 text-sm">
-                <div className="hud-title mb-2">Market value check (FantasyCalc)</div>
-                <div className="flex flex-wrap items-center gap-x-6 gap-y-1 font-mono">
-                  <span className="text-slate-400">
-                    You send <span className="text-rose-300">{result.market.give.toLocaleString()}</span>
-                  </span>
-                  <span className="text-slate-400">
-                    You get <span className="text-lime-300">{result.market.get.toLocaleString()}</span>
-                  </span>
-                  <span className="text-xs text-slate-500">
-                    {result.market.ratio >= 1.1 ? "They come out ahead on value" : result.market.ratio >= 0.9 ? "Fair by market value" : "You come out ahead on value"}
-                  </span>
+            {(result.market || result.expert) && (
+              <div className="grid gap-3 rounded-lg border border-white/10 bg-black/30 p-3 text-sm md:grid-cols-3">
+                <div>
+                  <div className="hud-title mb-1.5">Trade market (FantasyCalc)</div>
+                  {result.market ? (
+                    <div className="font-mono text-slate-400">
+                      Send <span className="text-rose-300">{result.market.give.toLocaleString()}</span> · Get{" "}
+                      <span className="text-lime-300">{result.market.get.toLocaleString()}</span>
+                    </div>
+                  ) : (
+                    <div className="text-slate-500">No market values</div>
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <div className="hud-title mb-1.5">Experts (FantasyPros ROS)</div>
+                  {result.expert ? (
+                    <div className="space-y-0.5 text-xs">
+                      <div className="truncate text-slate-400">
+                        Send: {result.expert.give.map((x) => `${x.name} ${x.rank}`).join(", ")}
+                      </div>
+                      <div className="truncate text-slate-400">
+                        Get: {result.expert.get.map((x) => `${x.name} ${x.rank}`).join(", ")}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-slate-500">Not ranked</div>
+                  )}
+                </div>
+                <div>
+                  <div className="hud-title mb-1.5">Fair?</div>
+                  {result.consensusRatio != null ? (
+                    <div className={result.consensusRatio > 1.25 ? "text-rose-300" : result.consensusRatio < 0.8 ? "text-amber-200" : "text-lime-300"}>
+                      {result.consensusRatio > 1.25
+                        ? "You overpay on value"
+                        : result.consensusRatio >= 1.08
+                          ? "You pay a little more"
+                          : result.consensusRatio >= 0.92
+                            ? "Fair on value"
+                            : result.consensusRatio >= 0.8
+                              ? "You get a little more"
+                              : "Lopsided in your favor"}
+                      <span className="block text-[11px] text-slate-500">Market and expert rankings combined</span>
+                    </div>
+                  ) : (
+                    <div className="text-slate-500">-</div>
+                  )}
                 </div>
               </div>
             )}
@@ -198,7 +236,7 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
               )}
             </div>
             <p className="text-xs text-slate-500">
-              The simulator plays out every remaining week with your best lineup, counts depth for injuries and byes, and weighs playoff weeks 1.5x. It can&apos;t see news or role changes, so ask the AI before you send it.
+              The simulator plays out every remaining week with your best lineup, counts depth for injuries and byes, and weighs playoff weeks 1.5x. Player values blend usage, projections, FantasyPros rest-of-season consensus and the trade market. Breaking news can still move things, so ask the AI before you send it.
             </p>
 
             <div className="flex flex-wrap items-center gap-3">
@@ -368,9 +406,9 @@ function TradeFinder({
       title="Trade finder"
       right={
         locked.length > 0 ? (
-          <span className="hidden text-[11px] text-amber-300/80 sm:inline">🔒 {locked.map(name).join(", ")}</span>
+          <span className="text-[11px] text-amber-300/80">🔒 {locked.map(name).join(", ")}</span>
         ) : (
-          <span className="hidden text-[11px] text-slate-500 sm:inline">Tap ○ on your players to lock them</span>
+          <span className="text-[11px] text-slate-500">Tap ○ on your players to lock them</span>
         )
       }
     >
@@ -411,7 +449,8 @@ function TradeFinder({
                   </div>
                   <div className="mt-0.5 text-xs text-slate-500">
                     {partner?.teamName} · <Delta value={r.perWeekAvg} suffix="/wk" /> · playoffs <Delta value={r.myPlayoffDelta} /> · {r.acceptance} to accept
-                    {r.market ? ` · market ${r.market.ratio <= 1.1 ? "fair" : "you pay a bit more"}` : ""}
+                    {r.theirPerWeekAvg > 0.2 ? ` · helps them too (+${r.theirPerWeekAvg.toFixed(1)}/wk)` : ""}
+                    {r.consensusRatio != null ? ` · ${r.consensusRatio <= 1.08 && r.consensusRatio >= 0.92 ? "fair value" : r.consensusRatio > 1.08 ? "you pay a bit more" : "you get a bit more"}` : ""}
                   </div>
                 </div>
                 <div className="flex gap-2">
@@ -438,8 +477,8 @@ function TradeFinder({
       )}
       {!ideas && progress == null && (
         <p className="mt-3 text-xs text-slate-500">
-          Scans every team for deals that upgrade your lineup, look fair by market value, and don&apos;t hurt their lineup much, then runs each one
-          through the full simulator.
+          Scans every team for rest-of-season deals both sides would take: your lineup improves, theirs doesn&apos;t get worse, and the
+          value is fair by trade market and FantasyPros expert rankings. Each idea runs through the full week-by-week simulator.
         </p>
       )}
     </Panel>

@@ -151,6 +151,32 @@ export function getWeekProjections(season: number, week: number): Promise<WeekPr
   });
 }
 
+// Only the stats that score points, so past-week projections stay small.
+const PROJ_KEYS = new Set([
+  "pass_yd", "pass_td", "pass_int", "pass_2pt", "rush_yd", "rush_td", "rush_2pt", "rec", "rec_yd", "rec_td", "rec_2pt",
+  "fum_lost", "bonus_rec_te", "rec_tgt", "rush_att",
+]);
+
+/** Pre-game projections for finished weeks (what each player was expected to score), slimmed. */
+export function getProjectionHistory(season: number, week: number): Promise<WeekProjections> {
+  return cached(`projhist:${season}:${week}`, 12 * HOUR, async () => {
+    const full = await getWeekProjections(season, week);
+    const lines: WeekProjections["lines"] = {};
+    for (const [id, l] of Object.entries(full.lines)) {
+      const s: Record<string, number> = {};
+      let any = false;
+      for (const [k, v] of Object.entries(l.s)) {
+        if (PROJ_KEYS.has(k)) {
+          s[k] = Math.round(v * 10) / 10;
+          any = true;
+        }
+      }
+      if (any && ((s.rec ?? 0) + (s.rush_att ?? 0) + (s.pass_yd ?? 0) > 0.5)) lines[id] = { team: l.team, opp: l.opp, s };
+    }
+    return { week, lines };
+  });
+}
+
 export function getTrending(type: "add" | "drop" = "add") {
   return cached(`trend:${type}`, 30 * MIN, () =>
     getJson<{ player_id: string; count: number }[]>(
@@ -271,7 +297,10 @@ export function getNflData(): Promise<NflData | null> {
     }
     const best = remote?.players && (!local || remote.updated > local.updated) ? remote : local;
     // The saved market history is only for the nightly calibration; don't ship it to browsers.
-    if (best) delete (best as NflData & { marketHistory?: unknown }).marketHistory;
+    if (best) {
+      delete (best as NflData & { marketHistory?: unknown }).marketHistory;
+      delete (best as NflData & { ecrHistory?: unknown }).ecrHistory;
+    }
     return best;
   });
 }

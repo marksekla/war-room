@@ -7,12 +7,14 @@ export function Panel({
   right,
   children,
   className = "",
+  bodyClassName = "",
   corners = false,
 }: {
   title?: React.ReactNode;
   right?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
+  bodyClassName?: string;
   corners?: boolean;
 }) {
   return (
@@ -23,7 +25,7 @@ export function Panel({
           {right}
         </header>
       )}
-      <div className="p-4">{children}</div>
+      <div className={`p-4 ${bodyClassName}`}>{children}</div>
     </section>
   );
 }
@@ -121,6 +123,35 @@ export function Spinner({ label }: { label?: string }) {
         <span className="relative inline-flex h-3 w-3 rounded-full bg-cyan-400" />
       </span>
       {label}
+    </div>
+  );
+}
+
+/** Circular chance-to-play gauge. Green when likely, amber when uncertain, red when unlikely. */
+export function ChanceRing({ p, size = 48 }: { p: number; size?: number }) {
+  const pct = Math.round(Math.max(0, Math.min(1, p)) * 100);
+  const r = size / 2 - 4;
+  const c = 2 * Math.PI * r;
+  const color = pct >= 80 ? "#a3ff12" : pct >= 50 ? "#fbbf24" : "#ff4d6d";
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }} aria-label={`${pct}% chance to play`}>
+      <svg width={size} height={size} className="-rotate-90">
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={4} />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke={color}
+          strokeWidth={4}
+          strokeLinecap="round"
+          strokeDasharray={`${(pct / 100) * c} ${c}`}
+          style={{ filter: `drop-shadow(0 0 4px ${color})` }}
+        />
+      </svg>
+      <span className="absolute inset-0 grid place-items-center font-mono text-[11px] font-semibold" style={{ color }}>
+        {pct}%
+      </span>
     </div>
   );
 }

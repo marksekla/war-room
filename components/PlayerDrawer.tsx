@@ -8,7 +8,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import type { LeagueModel, PlayerView } from "@/lib/model";
 import { fetchNews, fetchWeather, weatherNote } from "@/lib/live";
 import type { NewsItem, NflUsage, Weather } from "@/lib/types";
-import { InjuryTag, PosTag, RankChip } from "./ui";
+import { ChanceRing, InjuryTag, PosTag, RankChip } from "./ui";
 
 interface DrawerCtx {
   open: (id: string) => void;
@@ -130,7 +130,23 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
 
   const luck = a?.s?.fp != null && a.s.xfp != null ? a.s.fp - a.s.xfp : null;
   const weeks = model.remainingWeeks().slice(0, 6);
-  const maxPts = Math.max(1, ...(a?.wk ?? []).slice(-8).map((w) => Math.max(w[6] ?? 0, w[5] ?? 0)));
+  // Week-by-week: actual points in this league's scoring vs. what he was projected to score before the game.
+  const wkRows = (() => {
+    const byWeek = new Map<number, { w: number; pts: number | null; proj: number | null; xfp: number | null; snap: number | null }>();
+    for (const [w, snap, , , , xfp, fp] of a?.wk ?? []) byWeek.set(w, { w, pts: fp, proj: null, xfp, snap });
+    for (const g of v.log) {
+      const cur = byWeek.get(g.week) ?? { w: g.week, pts: null, proj: null, xfp: null, snap: g.teamSnaps ? g.snaps / g.teamSnaps : null };
+      cur.pts = g.pts; // league scoring wins over nflverse PPR
+      byWeek.set(g.week, cur);
+    }
+    for (const r of byWeek.values()) r.proj = model.pastProjection(v.p.id, r.w);
+    return [...byWeek.values()].sort((x, y) => x.w - y.w).slice(-8);
+  })();
+  const hasProj = wkRows.some((r) => r.proj != null);
+  const lineOf = (r: (typeof wkRows)[number]) => (hasProj ? r.proj : r.xfp);
+  const maxPts = Math.max(1, ...wkRows.map((r) => Math.max(r.pts ?? 0, lineOf(r) ?? 0)));
+  const play = v.p.pos !== "DEF" && model.gameFor(v.p.team, model.week) ? model.playChance(v.p.id) : null;
+  const showPlay = !!play && (play.p < 0.95 || play.practice.length > 0 || !!v.p.injury);
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/60 backdrop-blur-[2px]" onClick={onClose}>
@@ -179,31 +195,42 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
             }
           />
           <Tile
-            label="Market"
-            value={v.market ? `#${v.market.rank}` : "-"}
+            label="Expert rank"
+            value={v.ecrRos != null ? `${v.p.pos}${Math.round(v.ecrRos)}` : "-"}
             sub={
-              v.market ? (
-                <span>
-                  {v.p.pos}
-                  {v.market.posRank}{" "}
-                  {v.market.trend !== 0 && (
-                    <span className={v.market.trend > 0 ? "text-lime-300" : "text-rose-300"}>
-                      {v.market.trend > 0 ? "▲" : "▼"}
-                      {Math.abs(v.market.trend)}
-                    </span>
-                  )}
-                </span>
-              ) : (
-                "Not in top values"
-              )
+              <span>
+                {v.ecrRos != null ? "FantasyPros ROS" : "Not ranked"}
+                {v.market && (
+                  <span className="block text-[10px] text-slate-500">
+                    Market {v.p.pos}
+                    {v.market.posRank}
+                    {v.market.trend !== 0 && (
+                      <span className={v.market.trend > 0 ? "text-lime-300" : "text-rose-300"}>
+                        {" "}
+                        {v.market.trend > 0 ? "▲" : "▼"}
+                        {Math.abs(v.market.trend)}
+                      </span>
+                    )}
+                  </span>
+                )}
+              </span>
             }
           />
         </div>
 
         {/* Health */}
-        {(v.p.injury || pr || v.espn || model.roleShift.get(v.p.id)) && (
+        {(v.p.injury || pr || v.espn || model.roleShift.get(v.p.id) || showPlay) && (
           <Section title="Health and role">
             <div className="space-y-1.5 text-sm">
+              {showPlay && play && (
+                <div className="flex items-start gap-3 rounded-lg border border-white/10 bg-black/30 p-2.5">
+                  <ChanceRing p={play.p} size={44} />
+                  <div className="min-w-0 text-xs leading-snug">
+                    <div className="text-slate-200">Chance to play week {model.week}</div>
+                    <div className="mt-0.5 text-slate-400">{play.why}</div>
+                  </div>
+                </div>
+              )}
               {model.returnWeek.get(v.p.id) != null && (
                 <div className="text-amber-200">
                   Expected back:{" "}
@@ -271,13 +298,13 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
               </p>
             )}
 
-            {/* Weekly bars: PPR points (number on top) with the expected-points line. Numbers are always visible, no hover needed. */}
-            {a.wk.length > 0 && (
+            {/* Weekly bars: actual points (number on top) with the pre-game projection line. Numbers are always visible, no hover needed. */}
+            {wkRows.length > 0 && (
               <div className="mt-4">
                 <div className="mb-2 flex justify-between text-[10px] uppercase tracking-wider text-slate-500">
-                  <span>{a.wk.length > 8 ? "Last 8 games" : "Week by week"}</span>
+                  <span>{wkRows.length >= 8 ? "Last 8 games" : "Week by week"}</span>
                   <span>
-                    <span className="text-cyan-300">■</span> PPR pts <span className="ml-2 text-fuchsia-300">━</span> expected
+                    <span className="text-cyan-300">■</span> Scored <span className="ml-2 text-fuchsia-300">━</span> {hasProj ? "Projected" : "Expected (xFP)"}
                   </span>
                 </div>
                 <div className="flex gap-1.5">
@@ -285,24 +312,44 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
                     <span className="flex h-6 items-end pb-0.5">Pts</span>
                     <span className="h-20" />
                     <span className="mt-1 h-3.5 leading-[14px]">Wk</span>
-                    <span className="h-3.5 leading-[14px] text-fuchsia-300/80">xFP</span>
+                    {hasProj && <span className="h-3.5 leading-[14px] text-fuchsia-300/80">Proj</span>}
+                    <span className={`h-3.5 leading-[14px] ${hasProj ? "text-slate-500" : "text-fuchsia-300/80"}`} title="Expected points from his opportunity (targets, carries, field position)">
+                      xFP
+                    </span>
                     <span className="h-3.5 leading-[14px]">Snap</span>
                   </div>
-                  {a.wk.slice(-8).map(([w, snap, , , , xfp, fp]) => (
-                    <div key={w} className="flex min-w-0 flex-1 flex-col items-center">
-                      <span className="flex h-6 items-end pb-0.5 font-mono text-[11px] font-semibold text-slate-100">{fp != null ? fp.toFixed(1) : "-"}</span>
-                      <div className="relative flex h-20 w-full items-end">
-                        <div className="w-full rounded-t bg-cyan-400/60" style={{ height: `${((fp ?? 0) / maxPts) * 100}%` }} />
-                        {xfp != null && (
-                          <div className="absolute inset-x-0 h-0.5 bg-fuchsia-400 shadow-[0_0_6px_#e879f9]" style={{ bottom: `${(xfp / maxPts) * 100}%` }} />
-                        )}
+                  {wkRows.map((r) => {
+                    const line = lineOf(r);
+                    const beat = r.pts != null && line != null ? r.pts - line : null;
+                    return (
+                      <div key={r.w} className="flex min-w-0 flex-1 flex-col items-center">
+                        <span
+                          className={`flex h-6 items-end pb-0.5 font-mono text-[11px] font-semibold ${beat == null ? "text-slate-100" : beat >= 0 ? "text-lime-300" : "text-rose-300"}`}
+                        >
+                          {r.pts != null ? r.pts.toFixed(1) : "-"}
+                        </span>
+                        <div className="relative flex h-20 w-full items-end">
+                          <div className="w-full rounded-t bg-cyan-400/60" style={{ height: `${(Math.max(0, r.pts ?? 0) / maxPts) * 100}%` }} />
+                          {line != null && (
+                            <div
+                              className="absolute inset-x-0 h-0.5 bg-fuchsia-400 shadow-[0_0_6px_#e879f9]"
+                              style={{ bottom: `calc(${(Math.max(0, line) / maxPts) * 100}% - 1px)` }}
+                            />
+                          )}
+                        </div>
+                        <span className="mt-1 h-3.5 font-mono text-[10px] leading-[14px] text-slate-400">{r.w}</span>
+                        {hasProj && <span className="h-3.5 font-mono text-[10px] leading-[14px] text-fuchsia-300/90">{r.proj != null ? r.proj.toFixed(1) : "-"}</span>}
+                        <span className={`h-3.5 font-mono text-[10px] leading-[14px] ${hasProj ? "text-slate-500" : "text-fuchsia-300/90"}`}>{r.xfp != null ? r.xfp.toFixed(1) : "-"}</span>
+                        <span className="h-3.5 font-mono text-[10px] leading-[14px] text-slate-500">{r.snap != null ? `${Math.round(r.snap * 100)}%` : "-"}</span>
                       </div>
-                      <span className="mt-1 h-3.5 font-mono text-[10px] leading-[14px] text-slate-400">{w}</span>
-                      <span className="h-3.5 font-mono text-[10px] leading-[14px] text-fuchsia-300/90">{xfp != null ? xfp.toFixed(1) : "-"}</span>
-                      <span className="h-3.5 font-mono text-[10px] leading-[14px] text-slate-500">{snap != null ? `${Math.round(snap * 100)}%` : "-"}</span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
+                <p className="mt-2 text-[11px] leading-snug text-slate-500">
+                  {hasProj
+                    ? "Projected = what he was expected to score before kickoff. xFP = what his actual usage that day is usually worth, so a low xFP means the opportunity wasn't there."
+                    : "xFP = what his actual usage is usually worth (targets, carries, field position)."}
+                </p>
               </div>
             )}
 

@@ -164,6 +164,111 @@ def snapshot_market(history: dict, season: int, games: pd.DataFrame) -> dict:
     return history
 
 
+FPECR = "https://raw.githubusercontent.com/dynastyprocess/data/master/files/db_fpecr_latest.csv"
+# FantasyPros page -> (rest of season or this week, position)
+ECR_PAGES = {
+    "ros-qb": ("ros", "QB"), "ros-ppr-rb": ("ros", "RB"), "ros-ppr-wr": ("ros", "WR"), "ros-ppr-te": ("ros", "TE"),
+    "ros-k": ("ros", "K"), "ros-dst": ("ros", "DEF"),
+    "qb": ("wk", "QB"), "ppr-rb": ("wk", "RB"), "ppr-wr": ("wk", "WR"), "ppr-te": ("wk", "TE"), "k": ("wk", "K"), "dst": ("wk", "DEF"),
+}
+
+
+def norm_name(n) -> str:
+    import re
+    s = re.sub(r"\b(jr|sr|ii|iii|iv|v)\b", "", str(n).lower())
+    return re.sub(r"[^a-z]", "", s)
+
+
+def expert_rankings(ids: pd.DataFrame, games: pd.DataFrame, season: int, history: dict) -> tuple[dict | None, dict]:
+    """FantasyPros expert consensus rankings (rest of season + this week, PPR), via the free
+    DynastyProcess mirror. Also saves a weekly snapshot so calibrate.py can learn how much
+    expert rankings should count (same idea as the FantasyCalc snapshots)."""
+    history = {k: v for k, v in (history or {}).items() if int(k) >= season - 1}
+    ecr = read(FPECR)
+    if ecr.empty or ids.empty:
+        return None, history
+    fp_to_sid, fp_to_gsis = {}, {}
+    for r in ids[["fantasypros_id", "sleeper_id", "gsis_id"]].itertuples(index=False):
+        if pd.isna(r.fantasypros_id):
+            continue
+        k = str(int(float(r.fantasypros_id)))
+        if not pd.isna(r.sleeper_id):
+            fp_to_sid[k] = str(int(float(r.sleeper_id)))
+        if isinstance(r.gsis_id, str):
+            fp_to_gsis[k] = r.gsis_id
+    date = str(ecr.scrape_date.dropna().max())
+    gs = games[(games.season == season) & (games.game_type == "REG")] if not games.empty else games
+    # Weekly ranks belong to the first week with games still to come after the scrape date.
+    week = None
+    if not gs.empty:
+        after = gs[gs.gameday.astype(str) >= date]
+        if len(after):
+            week = int(after.week.min())
+    out = {"date": date, "week": week, "ros": {}, "wk": {}}
+    snap = {}
+    for r in ecr.itertuples(index=False):
+        page = str(r.fp_page).rsplit("/", 1)[-1].replace(".php", "")
+        if page not in ECR_PAGES:
+            continue
+        kind, pos = ECR_PAGES[page]
+        rank = num(r.ecr, 1)
+        if rank is None:
+            continue
+        fid = str(r.id).split(".")[0]
+        if pos == "DEF":
+            key = team(r.team)
+        else:
+            key = fp_to_sid.get(fid) or f"n:{norm_name(r.player)}:{team(r.team)}"
+        if not key:
+            continue
+        if kind == "ros":
+            out["ros"][key] = [rank, num(r.sd, 1)]
+            g = fp_to_gsis.get(fid)
+            if g and pos in ("QB", "RB", "WR", "TE"):
+                snap[g] = rank
+        else:
+            out["wk"][key] = rank
+    # Snapshot ROS ranks for the next unplayed week (for learning their weight later).
+    try:
+        upcoming = gs[gs.result.isna()]
+        if snap and not upcoming.empty:
+            history.setdefault(str(season), {})[str(int(upcoming.week.min()))] = snap
+    except Exception:  # noqa: BLE001
+        pass
+    log(f"  expert rankings {date}: {len(out['ros'])} rest-of-season, {len(out['wk'])} weekly (week {week})")
+    return out, history
+
+
+DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def practice_log(inj: pd.DataFrame, prev: dict | None, upcoming_week: int | None) -> dict:
+    """Day-by-day practice participation for the current week. nflverse keeps only the latest
+    status per week, so each build records what it sees under today's date (ET) and keeps
+    earlier days from the previous build."""
+    if inj.empty:
+        return {}
+    cur_week = int(inj[inj.season_type == "REG"].week.max())
+    if upcoming_week and cur_week < upcoming_week:
+        return {"w": upcoming_week, "p": {}}  # this week's reports haven't started yet
+    prev = prev if prev and prev.get("w") == cur_week else {"w": cur_week, "p": {}}
+    day = DAYS[datetime.now(ZoneInfo("America/New_York")).weekday()]
+    short = {"Did Not Participate In Practice": "DNP", "Limited Participation in Practice": "LP",
+             "Full Participation in Practice": "FP"}
+    rows = inj[(inj.season_type == "REG") & (inj.week == cur_week)]
+    out = {"w": cur_week, "p": dict(prev.get("p", {}))}
+    for r in rows.itertuples(index=False):
+        st = short.get(r.practice_status) if isinstance(r.practice_status, str) else None
+        if not st or not isinstance(r.gsis_id, str):
+            continue
+        days = dict(out["p"].get(r.gsis_id, {}))
+        # Only record changes: the source can lag a day, so a repeat isn't proof he practiced again.
+        if not days or list(days.values())[-1] != st:
+            days[day] = st
+        out["p"][r.gsis_id] = days
+    return out
+
+
 def default_season() -> int:
     now = datetime.now(timezone.utc)
     return now.year if now.month >= 8 else now.year - 1
@@ -178,7 +283,13 @@ def main() -> None:
     inj = read(f"{NFLVERSE}/injuries/injuries_{season}.csv")
     pbp = read(f"{NFLVERSE}/pbp/play_by_play_{season}.csv.gz")
     ftn = read(f"{NFLVERSE}/ftn_charting/ftn_charting_{season}.csv")
-    games = read(f"{NFLVERSE}/schedules/games.csv")
+    # The schedule has moved between files over time: try each known location.
+    games = pd.DataFrame()
+    for url in (f"{NFLVERSE}/schedules/games.csv.gz", f"{NFLVERSE}/schedules/games.csv",
+                "https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv"):
+        games = read(url)
+        if not games.empty and "season" in games.columns:
+            break
     xfp = read(f"{FFOPP}/ep_weekly_{season}.csv")
     ids = read(IDS)
     ngs = {t: read(f"{NFLVERSE}/nextgen_stats/ngs_{t}.csv.gz") for t in ("receiving", "rushing", "passing")}
@@ -524,18 +635,31 @@ def main() -> None:
     # Learn the model's weights from past results (only re-runs when a new week finishes).
     prev = None
     history = {}
+    ecr_history = {}
+    old_prac = None
     if os.path.exists(OUT):
         try:
             with open(OUT) as fh:
                 old_data = json.load(fh)
             prev = old_data.get("calib")
             history = old_data.get("marketHistory") or {}
+            ecr_history = old_data.get("ecrHistory") or {}
+            old_prac = old_data.get("pracLog")
         except (OSError, ValueError):
             prev = None
     data["marketHistory"] = snapshot_market(history, season, games)
+    data["ecr"], data["ecrHistory"] = expert_rankings(ids, games, season, ecr_history)
+    try:
+        nxt = games[(games.season == season) & (games.game_type == "REG") & games.result.isna()].week.min()
+        nxt = int(nxt) if not pd.isna(nxt) else None
+    except Exception:  # noqa: BLE001
+        nxt = None
+    data["pracLog"] = practice_log(inj, old_prac, nxt)
     try:
         data["calib"] = (
-            calibrate(season, max_week, ids, games, prev, data["marketHistory"]) if not ids.empty and not games.empty else prev
+            calibrate(season, max_week, ids, games, prev, data["marketHistory"], data["ecrHistory"])
+            if not ids.empty and not games.empty
+            else prev
         )
     except Exception as e:  # noqa: BLE001 - calibration is a bonus, never block the data build
         log(f"Calibration failed ({e.__class__.__name__}: {e}); keeping previous weights.")
