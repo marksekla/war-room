@@ -49,8 +49,12 @@ export default function Availability({ model, myId }: { model: LeagueModel; myId
       const pc = model.playChance(v.p.id);
       const flagged = !!v.p.injury || pc.practice.length > 0 || pc.p < 0.95;
       if (!flagged) continue;
-      // Fantasy-relevant only: rostered, or someone people would start.
-      const relevant = v.ownerRosterId != null || v.valuePg >= 6 || (v.ecrRos != null && v.ecrRos <= 50);
+      // Healthy scratches and backups listed for non-injury reasons aren't injury news.
+      if (v.ownerRosterId == null && /coach'?s decision|not injury|non-injury|personal/i.test(pc.injury ?? "")) continue;
+      // Fantasy-relevant only: rostered, or someone people would actually start.
+      const startable: Record<string, number> = { QB: 20, RB: 55, WR: 70, TE: 20, K: 14 };
+      const relevant =
+        v.ownerRosterId != null || (v.ecrRos != null ? v.ecrRos <= (startable[v.p.pos] ?? 40) : v.valuePg >= (v.p.pos === "QB" ? 15 : 7));
       if (!relevant) continue;
       out.push({ v, pc, kick: new Date(g.game.kickoff).getTime(), opp: g.opp, home: g.home });
     }
@@ -82,30 +86,6 @@ export default function Availability({ model, myId }: { model: LeagueModel; myId
           new week (usually Tuesday or Wednesday), right as the first practice reports come out.
         </div>
       )}
-      {myFlagged.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {myFlagged
-            .slice()
-            .sort((a, b) => a.pc.p - b.pc.p)
-            .map((r) => (
-              <button
-                key={r.v.p.id}
-                onClick={() => open(r.v.p.id)}
-                className="flex min-w-0 items-center gap-3 rounded-xl border border-cyan-400/15 bg-[#0a0e1b]/80 p-3 text-left transition hover:border-cyan-300/40"
-              >
-                <ChanceRing p={r.pc.p} size={46} />
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold text-slate-100">{r.v.p.name}</div>
-                  <div className="truncate text-[11px] text-slate-400">
-                    {r.pc.status ?? "Practice report"}
-                    {r.pc.injury ? ` · ${r.pc.injury}` : ""}
-                  </div>
-                </div>
-              </button>
-            ))}
-        </div>
-      )}
-
       <Panel
         title={`Are they playing? · Week ${model.week}`}
         corners
@@ -138,7 +118,7 @@ export default function Availability({ model, myId }: { model: LeagueModel; myId
           </div>
           <label className="ml-auto flex cursor-pointer items-center gap-2 text-sm text-slate-300">
             <input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} className="h-4 w-4 accent-cyan-400" />
-            My team
+            My team{myFlagged.length ? <span className="font-mono text-xs text-cyan-300">({myFlagged.length})</span> : null}
           </label>
         </div>
 
@@ -162,7 +142,7 @@ export default function Availability({ model, myId }: { model: LeagueModel; myId
                 </thead>
                 <tbody>
                   {shown.map(({ v, pc, kick, opp, home }) => (
-                    <tr key={v.p.id}>
+                    <tr key={v.p.id} className={v.ownerRosterId === myId ? "bg-cyan-400/10" : ""}>
                       <td>
                         <div className="flex items-center gap-2">
                           <PosTag pos={v.p.pos} />
@@ -204,7 +184,7 @@ export default function Availability({ model, myId }: { model: LeagueModel; myId
             <ul className="space-y-2 md:hidden">
               {shown.map(({ v, pc, kick, opp, home }) => (
                 <li key={v.p.id}>
-                  <button onClick={() => open(v.p.id)} className="flex w-full items-center gap-3 rounded-lg border border-white/10 bg-black/20 p-3 text-left">
+                  <button onClick={() => open(v.p.id)} className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left ${v.ownerRosterId === myId ? "border-cyan-400/30 bg-cyan-400/10" : "border-white/10 bg-black/20"}`}>
                     <ChanceRing p={pc.p} size={46} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
