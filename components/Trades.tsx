@@ -10,14 +10,18 @@ import { usePlayerDrawer } from "./PlayerDrawer";
 const POS_ORDER: Record<string, number> = { QB: 0, RB: 1, WR: 2, TE: 3, K: 4, DEF: 5 };
 
 export default function Trades({ model, myId, askAgent }: { model: LeagueModel; myId: number; askAgent: (p: string) => void }) {
-  const others = model.teams.filter((t) => t.rosterId !== myId);
-  const [partnerId, setPartnerId] = useState<number>(others[0]?.rosterId ?? 0);
+  // Side A defaults to your team, but any two teams can be compared.
+  const [sideA, setSideA] = useState<number>(myId);
+  const others = model.teams.filter((t) => t.rosterId !== sideA);
+  const [partnerId, setPartnerId] = useState<number>(model.teams.find((t) => t.rosterId !== myId)?.rosterId ?? 0);
   const [give, setGive] = useState<string[]>([]);
   const [get, setGet] = useState<string[]>([]);
   const [metric, setMetric] = useState<"ros" | "week">("ros");
 
-  const me = model.team(myId)!;
-  const partner = model.team(partnerId);
+  const me = model.team(sideA)!;
+  const isMe = sideA === myId;
+  const partner = partnerId !== sideA ? model.team(partnerId) : undefined;
+  const aName = isMe ? "you" : me.teamName;
   const profile = useMemo(() => (partner && model.activity ? model.managerProfile(partner.rosterId) : null), [model, partner]);
 
   const score = (v: PlayerView) => (metric === "ros" ? v.rosPoints : model.expected(v.p.id, model.week));
@@ -33,13 +37,13 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
   };
 
   const result = useMemo(
-    () => (give.length && get.length && partner ? model.evaluateTrade(myId, partnerId, give, get) : null),
-    [model, myId, partnerId, give, get, partner]
+    () => (give.length && get.length && partner ? model.evaluateTrade(sideA, partnerId, give, get) : null),
+    [model, sideA, partnerId, give, get, partner]
   );
 
   const impact = useMemo(
-    () => (give.length && get.length && partner ? model.tradePlayoffImpact(myId, partnerId, give, get) : null),
-    [model, myId, partnerId, give, get, partner]
+    () => (give.length && get.length && partner ? model.tradePlayoffImpact(sideA, partnerId, give, get) : null),
+    [model, sideA, partnerId, give, get, partner]
   );
 
   const toggle = (list: string[], set: (x: string[]) => void, id: string) =>
@@ -54,6 +58,7 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
   const simRef = useRef<HTMLDivElement>(null);
 
   const loadIdea = (pid: number, g: string[], gt: string[]) => {
+    setSideA(myId);
     setPartnerId(pid);
     setGive(g);
     setGet(gt);
@@ -64,36 +69,85 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
     <div className="space-y-6">
       <TradeFinder model={model} myId={myId} locked={locked} onLoad={loadIdea} askAgent={askAgent} />
 
-      <div className="flex flex-wrap items-center gap-3">
-        <span className="hud-title">Trade partner</span>
-        <select
-          className="input w-full sm:w-auto"
-          value={partnerId}
-          onChange={(e) => {
-            setPartnerId(Number(e.target.value));
-            setGet([]);
+      {/* Pick any two teams: side A defaults to yours. */}
+      <div className="panel flex flex-wrap items-end gap-3 p-4">
+        <TeamSelect
+          label={isMe ? "Your side" : "Team A"}
+          value={sideA}
+          teams={model.teams}
+          myId={myId}
+          onChange={(id) => {
+            setSideA(id);
+            setGive([]);
+            if (id === partnerId) {
+              setPartnerId(model.teams.find((t) => t.rosterId !== id)?.rosterId ?? 0);
+              setGet([]);
+            }
+          }}
+        />
+        <button
+          className="mb-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-cyan-400/25 text-lg text-cyan-200 transition hover:bg-cyan-400/10 hover:shadow-glow"
+          title="Swap sides"
+          aria-label="Swap sides"
+          onClick={() => {
+            const a = sideA;
+            setSideA(partnerId);
+            setPartnerId(a);
+            setGive(get);
+            setGet(give);
           }}
         >
-          {others.map((t) => (
-            <option key={t.rosterId} value={t.rosterId} className="bg-slate-900">
-              {t.teamName} ({t.ownerName}) {t.wins}-{t.losses}
-            </option>
-          ))}
-        </select>
-        {(give.length > 0 || get.length > 0) && (
-          <button className="btn btn-ghost" onClick={() => { setGive([]); setGet([]); }}>Clear</button>
-        )}
-        <div className="ml-auto flex rounded-lg border border-white/10 p-0.5 font-mono text-xs" role="group" aria-label="Show points for">
-          {(["ros", "week"] as const).map((k) => (
+          ⇄
+        </button>
+        <TeamSelect
+          label="Trade partner"
+          value={partnerId}
+          teams={others}
+          myId={myId}
+          onChange={(id) => {
+            setPartnerId(id);
+            setGet([]);
+          }}
+        />
+        <div className="ml-auto flex items-center gap-2">
+          {(give.length > 0 || get.length > 0) && (
             <button
-              key={k}
-              onClick={() => setMetric(k)}
-              className={`rounded-md px-2.5 py-1 ${metric === k ? "bg-cyan-400/20 text-cyan-100" : "text-slate-400 hover:text-slate-100"}`}
-              title={k === "ros" ? "Projected points for the rest of the season" : `Projected points this week (week ${model.week})`}
+              className="btn btn-ghost"
+              onClick={() => {
+                setGive([]);
+                setGet([]);
+              }}
             >
-              {k === "ros" ? "ROS" : `Wk ${model.week}`}
+              Clear
             </button>
-          ))}
+          )}
+          {!isMe && (
+            <button
+              className="btn btn-ghost"
+              onClick={() => {
+                setSideA(myId);
+                setGive([]);
+                if (partnerId === myId) {
+                  setPartnerId(model.teams.find((t) => t.rosterId !== myId)?.rosterId ?? 0);
+                  setGet([]);
+                }
+              }}
+            >
+              Back to my team
+            </button>
+          )}
+          <div className="flex rounded-lg border border-white/10 p-0.5 font-mono text-xs" role="group" aria-label="Show points for">
+            {(["ros", "week"] as const).map((k) => (
+              <button
+                key={k}
+                onClick={() => setMetric(k)}
+                className={`rounded-md px-2.5 py-1 ${metric === k ? "bg-cyan-400/20 text-cyan-100" : "text-slate-400 hover:text-slate-100"}`}
+                title={k === "ros" ? "Projected points for the rest of the season" : `Projected points this week (week ${model.week})`}
+              >
+                {k === "ros" ? "ROS" : `Wk ${model.week}`}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -101,16 +155,23 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
 
       <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
         <RosterPicker
-          title={`You send (${me.teamName})`}
-          players={sortRoster(model.rosterAll(myId))}
+          title={isMe ? `You send (${me.teamName})` : `${me.teamName} sends`}
+          players={sortRoster(model.rosterAll(sideA))}
           selected={give}
           onToggle={(id) => toggle(give, setGive, id)}
           tone="rose"
           label={label}
-          locked={locked}
-          onLock={toggleLock}
+          locked={isMe ? locked : undefined}
+          onLock={isMe ? toggleLock : undefined}
         />
-        <RosterPicker title={`You get (${partner?.teamName ?? ""})`} players={sortRoster(partner ? model.rosterAll(partner.rosterId) : [])} selected={get} onToggle={(id) => toggle(get, setGet, id)} tone="lime" label={label} />
+        <RosterPicker
+          title={isMe ? `You get (${partner?.teamName ?? ""})` : `${partner?.teamName ?? ""} sends`}
+          players={sortRoster(partner ? model.rosterAll(partner.rosterId) : [])}
+          selected={get}
+          onToggle={(id) => toggle(get, setGet, id)}
+          tone="lime"
+          label={label}
+        />
       </div>
 
       <div ref={simRef} className="scroll-mt-24" />
@@ -121,8 +182,8 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
           <div className="space-y-6">
             <div className="grid gap-3 md:grid-cols-4">
               <Big
-                label="Verdict"
-                value={result.verdict}
+                label={isMe ? "Verdict" : `Verdict for ${me.teamName}`}
+                value={isMe ? result.verdict : result.verdict.replace(" for you", "")}
                 tone={/win/i.test(result.verdict) ? "lime" : /loss/i.test(result.verdict) ? "rose" : "cyan"}
                 sub={
                   impact ? (
@@ -134,13 +195,13 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
                 }
               />
               <Big
-                label="Your lineup, rest of season"
+                label={isMe ? "Your lineup, rest of season" : `${me.teamName} lineup, rest of season`}
                 value={<Delta value={result.myDelta} suffix=" pts" />}
                 sub={<>Avg <Delta value={result.perWeekAvg} suffix=" / week" /></>}
               />
               <Big label="Next 3 weeks / playoffs" value={<span><Delta value={result.myNearDelta} /> / <Delta value={result.myPlayoffDelta} /></span>} />
               <Big
-                label="They accept?"
+                label={isMe ? "They accept?" : `${partner?.teamName ?? "They"} accepts?`}
                 value={result.acceptance}
                 sub={
                   <>
@@ -153,7 +214,7 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
             </div>
 
             <div>
-              <div className="hud-title mb-3">Week by week (your lineup change)</div>
+              <div className="hud-title mb-3">Week by week ({isMe ? "your" : `${me.teamName}'s`} lineup change)</div>
               <div className="flex h-32 items-center gap-1.5">
                 {result.perWeek.map((w) => (
                   <div key={w.week} className="flex h-full flex-1 flex-col items-center" title={`Week ${w.week}: ${w.me > 0 ? "+" : ""}${w.me}`}>
@@ -219,6 +280,11 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
               </div>
             )}
 
+            {!isMe && (
+              <p className="-mb-2 text-xs text-slate-400">
+                Seen from {me.teamName}&apos;s side: below, &quot;you&quot; means {me.teamName} and &quot;they&quot; means {partner?.teamName}.
+              </p>
+            )}
             <div className="grid gap-4 md:grid-cols-2">
               <div>
                 <div className="hud-title mb-2">Why</div>
@@ -248,9 +314,12 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
                 className="btn btn-violet"
                 onClick={() =>
                   askAgent(
-                    `Analyze this trade like an expert: I give ${names(give)} to ${partner?.teamName} and get ${names(get)}. ` +
-                      `Use evaluate_trade, then check news and get_player for every player involved (injuries, role, usage trend, schedule), my roster fit and depth, byes, the playoff schedule, my strategy rules (players I won't trade, selling low), and the other manager's needs and trade habits. ` +
-                      `Tell me if I should accept, and if not, suggest a fair counter they would actually accept.`
+                    isMe
+                      ? `Analyze this trade like an expert: I give ${names(give)} to ${partner?.teamName} and get ${names(get)}. ` +
+                          `Use evaluate_trade, then check news and get_player for every player involved (injuries, role, usage trend, schedule), my roster fit and depth, byes, the playoff schedule, my strategy rules (players I won't trade, selling low), and the other manager's needs and trade habits. ` +
+                          `Tell me if I should accept, and if not, suggest a fair counter they would actually accept.`
+                      : `Grade this trade between two other teams like an expert: ${me.teamName} sends ${names(give)} to ${partner?.teamName} for ${names(get)}. ` +
+                          `Use evaluate_trade with fromTeam "${me.teamName}", check news and roles for every player, and both teams' needs and depth. Who won it, by how much, and how does it change the league race and my own path?`
                   )
                 }
               >
@@ -486,5 +555,33 @@ function TradeFinder({
         </p>
       )}
     </Panel>
+  );
+}
+
+function TeamSelect({
+  label,
+  value,
+  teams,
+  myId,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  teams: { rosterId: number; teamName: string; ownerName: string; wins: number; losses: number }[];
+  myId: number;
+  onChange: (id: number) => void;
+}) {
+  return (
+    <label className="flex min-w-0 flex-1 flex-col gap-1.5 sm:max-w-sm">
+      <span className="hud-title">{label}</span>
+      <select className="input w-full" value={value} onChange={(e) => onChange(Number(e.target.value))}>
+        {teams.map((t) => (
+          <option key={t.rosterId} value={t.rosterId} className="bg-slate-900">
+            {t.teamName} ({t.ownerName}) {t.wins}-{t.losses}
+            {t.rosterId === myId ? " · you" : ""}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }

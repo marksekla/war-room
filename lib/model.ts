@@ -1663,6 +1663,49 @@ export class LeagueModel {
   }
 
 
+  /**
+   * Handcuff / stash value. If a backup is next in line behind a better teammate, estimate what he'd
+   * score per game if that starter misses time, the chance the starter misses at least one game the
+   * rest of the season, and the expected extra points that would add to a given lineup.
+   */
+  contingentValue(id: string, rosterId?: number) {
+    const v = this.views.get(id);
+    if (!v || !v.p.team || !["RB", "WR", "TE"].includes(v.p.pos)) return null;
+    const mates = [...this.views.values()]
+      .filter((t) => t.p.team === v.p.team && t.p.pos === v.p.pos && t.p.id !== id && !(t.p.injury && LONG_TERM.has(t.p.injury)))
+      .sort((a, b) => b.valuePg - a.valuePg);
+    const starter = mates.find((t) => t.valuePg > v.valuePg * 1.25 && t.valuePg >= 8);
+    if (!starter) return null;
+    // He has to be the next man up: nobody else between him and the starter.
+    const between = mates.filter((t) => t !== starter && t.valuePg > v.valuePg && t.valuePg < starter.valuePg);
+    if (between.length) return null;
+    const transfer: Record<string, number> = { RB: 0.75, TE: 0.6, WR: 0.45 };
+    const ifOut = Math.max(v.valuePg, transfer[v.p.pos] * starter.valuePg + 0.25 * v.valuePg);
+    const weeks = this.remainingWeeks().filter((w) => w > this.week && (this.returnWeek.get(starter.p.id) ?? 0) <= w);
+    if (!weeks.length || ifOut <= v.valuePg + 1) return null;
+    const missProbs = weeks.map((w) => 1 - this.availability(starter, w));
+    const expMissed = missProbs.reduce((a, b) => a + b, 0);
+    const missChance = 1 - missProbs.reduce((a, q) => a * (1 - q), 1);
+    // Extra points for this lineup: only what beats the player he'd replace in your lineup.
+    let bar = 0;
+    if (rosterId != null) {
+      const t = this.team(rosterId);
+      if (t) {
+        const lu = this.lineup(t.players, (x) => this.views.get(x)?.valuePg ?? 0);
+        const eligible = lu.filled.filter((f) => f.slot === v.p.pos || (f.slot in FLEX_SLOTS && FLEX_SLOTS[f.slot].includes(v.p.pos)));
+        bar = Math.min(...eligible.map((f) => f.val), Infinity);
+        if (!Number.isFinite(bar)) bar = 0;
+      }
+    }
+    return {
+      starter: starter.p.name,
+      starterId: starter.p.id,
+      ifOutPg: round1(ifOut),
+      missChance: Math.round(missChance * 100),
+      pts: round1(expMissed * Math.max(0, ifOut - Math.max(bar, v.valuePg))),
+    };
+  }
+
   /** FAAB bid suggestion: share of your remaining budget scaled by lineup gain, tuned to how this league bids. */
   faab(myId: number) {
     const st = this.bundle.league.settings ?? {};

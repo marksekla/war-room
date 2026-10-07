@@ -36,10 +36,19 @@ function RosWaivers({ model, myId }: { model: LeagueModel; myId: number }) {
   const [dropId, setDropId] = useState<string>(drops[0]?.p.id ?? "");
 
   const rows = useMemo(() => {
-    const list = model.freeAgents(pos).slice(0, 30);
+    const list = model.freeAgents(pos).slice(0, 40);
     return list
-      .map((v) => ({ v, gain: dropId ? model.waiverGain(myId, v.p.id, dropId) : 0 }))
-      .sort((a, b) => b.gain - a.gain || b.v.rosPoints - a.v.rosPoints);
+      .map((v) => {
+        const cuff = model.contingentValue(v.p.id, myId);
+        // Rising role: snap share in his last game well above his earlier average.
+        const snaps = v.log.map((g) => (g.teamSnaps ? g.snaps / g.teamSnaps : 0));
+        const prior = snaps.slice(0, -1);
+        const rising = snaps.length >= 3 && snaps[snaps.length - 1] - prior.reduce((a, b) => a + b, 0) / prior.length >= 0.15;
+        const gain = dropId ? model.waiverGain(myId, v.p.id, dropId) : 0;
+        return { v, gain, cuff, rising, score: gain + (cuff?.pts ?? 0) };
+      })
+      .sort((a, b) => b.score - a.score || b.v.rosPoints - a.v.rosPoints)
+      .slice(0, 30);
   }, [model, myId, pos, dropId]);
 
   return (
@@ -105,7 +114,7 @@ function RosWaivers({ model, myId }: { model: LeagueModel; myId: number }) {
                 </tr>
               </thead>
               <tbody>
-                {rows.map(({ v, gain }) => {
+                {rows.map(({ v, gain, cuff, rising }) => {
                   const g = model.gameFor(v.p.team, model.week);
                   const d = g ? model.dvp.get(g.opp)?.get(v.p.pos) : undefined;
                   return (
@@ -113,12 +122,31 @@ function RosWaivers({ model, myId }: { model: LeagueModel; myId: number }) {
                       <td>
                         <div className="flex items-center gap-2">
                           <PosTag pos={v.p.pos} />
-                          <PlayerName v={v} className="max-w-[130px] sm:max-w-none" />
-                          <span className="hidden text-xs text-slate-500 sm:inline">{v.p.team}</span>
-                          <InjuryTag status={v.p.injury} />
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <PlayerName v={v} className="max-w-[130px] sm:max-w-none" />
+                              <span className="hidden text-xs text-slate-500 sm:inline">{v.p.team}</span>
+                              <InjuryTag status={v.p.injury} />
+                            </div>
+                            {(cuff || rising) && (
+                              <div className="mt-0.5 flex flex-wrap gap-x-2 text-[10px] leading-tight">
+                                {cuff && (
+                                  <span className="text-violet-300" title={`${cuff.missChance}% chance ${cuff.starter} misses a game the rest of the season`}>
+                                    Handcuff: ~{cuff.ifOutPg.toFixed(0)}/gm if {cuff.starter.replace(/^(\S)\S*\s+/, "$1. ")} is out
+                                  </span>
+                                )}
+                                {rising && <span className="text-lime-300">Snaps rising</span>}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </td>
-                      <td><Delta value={gain} /></td>
+                      <td title={Math.abs(gain) < 3 ? "Too small to matter: under 3 points over the rest of the season" : undefined}>
+                        <span className={Math.abs(gain) < 3 ? "opacity-40" : ""}>
+                          <Delta value={gain} />
+                        </span>
+                        {cuff && cuff.pts >= 0.5 && <span className="block text-[10px] text-violet-300">+{cuff.pts.toFixed(1)} upside</span>}
+                      </td>
                       {faab && <td className="font-mono text-amber-200">{faab.suggest(gain) ? `$${faab.suggest(gain)}` : "-"}</td>}
                       <td className="font-mono">{v.rosPoints.toFixed(0)}</td>
                       <td className="mhide font-mono">{v.last3.toFixed(1)}</td>
@@ -145,7 +173,9 @@ function RosWaivers({ model, myId }: { model: LeagueModel; myId: number }) {
         )}
       </Panel>
       <p className="text-xs text-slate-500">
-        Tap a name for snap trends, red zone work, expected points and news. Injured players only show up if they&apos;re due back before your playoffs.
+        Faded gains are under 3 points for the rest of the season, so they&apos;re basically even. Handcuffs show what a backup would score per
+        game if the starter ahead of him misses time; &quot;upside&quot; is those extra points weighted by the chance it happens, and it counts in
+        the sort order. Tap a name for snap trends, red zone work, expected points and news. Injured players only show up if they&apos;re due back before your playoffs.
         {faab ? " Bids scale with lineup gain and how big your league bids." : ""} Numbers lag breaking news, so ask the AI agent before you claim
         anyone.
       </p>

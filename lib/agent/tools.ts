@@ -303,7 +303,14 @@ export const TOOLS: ToolDef[] = [
         players: m
           .freeAgents(pos)
           .slice(0, limit)
-          .map((v) => ({ ...playerSummary(m, v), lineupGainIfAdded: drop ? m.waiverGain(myId, v.p.id, drop.p.id) : null })),
+          .map((v) => {
+            const c = m.contingentValue(v.p.id, myId);
+            return {
+              ...playerSummary(m, v),
+              lineupGainIfAdded: drop ? m.waiverGain(myId, v.p.id, drop.p.id) : null,
+              handcuff: c ? { behind: c.starter, ptsPerGameIfStarterOut: c.ifOutPg, chanceStarterMissesAGamePct: c.missChance, expectedUpsidePts: c.pts } : undefined,
+            };
+          }),
       };
     },
   },
@@ -357,14 +364,21 @@ export const TOOLS: ToolDef[] = [
       properties: {
         give: { type: "array", items: { type: "string" }, description: "Player names the user sends" },
         get: { type: "array", items: { type: "string" }, description: "Player names the user receives" },
+        fromTeam: {
+          type: "string",
+          description: "Optional: judge a trade between two other teams, from this team's side (team or owner name). 'give' is what this team sends.",
+        },
       },
       required: ["give", "get"],
     },
     label: () => "Simulating the trade",
-    run: (m, myId, a) => {
+    run: (m, me, a) => {
       const give = resolvePlayers(m, a.give);
       const get = resolvePlayers(m, a.get);
       if (give.missing.length || get.missing.length) return { error: `Could not find: ${[...give.missing, ...get.missing].join(", ")}` };
+      const side = a.fromTeam ? resolveTeam(m, a.fromTeam) : null;
+      if (a.fromTeam && !side) return { error: `Could not find team ${a.fromTeam}` };
+      const myId = side?.rosterId ?? me;
       const partner = get.ids.map((id) => m.ownerOf.get(id)).find((r) => r != null && r !== myId);
       if (partner == null) return { error: "The players you receive must be on another team's roster." };
       const r = m.evaluateTrade(myId, partner, give.ids, get.ids);
