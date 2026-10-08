@@ -1,5 +1,6 @@
 "use client";
 
+import type { OfficialReport } from "@/lib/model";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { LeagueModel } from "./model";
 import type {
@@ -113,7 +114,7 @@ export function LeagueProvider({ children }: { children: React.ReactNode }) {
         const ppr = lg.scoring_settings?.rec ?? 1;
         setProgress("Loading players, stats, schedule and advanced data");
         const pastWeeks = statWeeks.filter((w) => w < week);
-        const [players, stats, projections, schedule, trending, nfl, values, injuries, activity, espnProj, projHistory] = await Promise.all([
+        const [players, stats, projections, schedule, trending, nfl, values, injuries, activity, espnProj, projHistory, official] = await Promise.all([
           api<PlayerMap>(`/api/players`),
           api<WeekStats[]>(`/api/stats?season=${season}&weeks=${statWeeks.join(",")}&current=${week}`),
           api<WeekProjections[]>(`/api/projections?season=${season}&weeks=${week},${Math.min(18, week + 1)}`),
@@ -128,6 +129,7 @@ export function LeagueProvider({ children }: { children: React.ReactNode }) {
           pastWeeks.length
             ? api<WeekProjections[]>(`/api/proj-history?season=${season}&weeks=${pastWeeks.join(",")}`).catch(() => null)
             : Promise.resolve(null),
+          api<OfficialReport>(`/api/official-injuries?season=${season}&week=${week}`).catch(() => null),
         ]);
         if (cancelled) return;
         setProgress("Running the numbers");
@@ -138,6 +140,7 @@ export function LeagueProvider({ children }: { children: React.ReactNode }) {
           activity,
           espnProj,
           projHistory,
+          official,
         });
         setModel(m);
         if (saved.rosterId == null || !m.team(saved.rosterId)) {

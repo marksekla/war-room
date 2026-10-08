@@ -178,4 +178,9 @@ def report(season: int, week: int, ids) -> tuple[list[dict], dict]:
         matched += r["gsis"] is not None
     diag["matched"] = matched
     diag["teams"] = len({r["team"] for r in rows if r["team"]})
+    by: dict[str, int] = {}
+    for r in rows:
+        by[r["team"] or "?"] = by.get(r["team"] or "?", 0) + 1
+    diag["byTeam"] = by
+    diag["unmatchedSkill"] = [r["name"] for r in rows if not r["gsis"] and r["pos"] in ("QB", "RB", "WR", "TE", "K")][:15]
     return rows, diag

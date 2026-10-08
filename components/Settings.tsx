@@ -197,13 +197,15 @@ export default function Settings({ onClose }: { onClose: () => void }) {
               </li>
               <li>Injury designations: ESPN (every 15 minutes) layered on Sleeper</li>
               <li>
-                Practice reports and official game statuses: NFL official injury report from nfl.com (read with each data update, usually
-                within an hour or two of teams posting it; nflverse as backup)
-                {nfl?.officialReport
-                  ? nfl.officialReport.n
-                    ? ` · week ${nfl.officialReport.w}: ${nfl.officialReport.n} players listed, checked ${new Date(nfl.officialReport.at).toLocaleString()}`
-                    : ` · week ${nfl.officialReport.w}: not posted yet`
-                  : ""}
+                Practice reports and official game statuses: NFL official injury report, read live from nfl.com every 15 minutes (the data update
+                keeps a day-by-day log; nflverse as backup)
+                {model?.extras.official?.rows?.length
+                  ? ` · week ${model.extras.official.week}: ${model.extras.official.rows.length} players listed, checked ${new Date(model.extras.official.fetchedAt).toLocaleTimeString()}`
+                  : model?.extras.official
+                    ? ` · week ${model.extras.official.week}: not posted yet`
+                    : nfl?.officialReport?.n
+                      ? ` · live read unavailable, using the ${new Date(nfl.officialReport.at).toLocaleString()} copy`
+                      : ""}
               </li>
               <li>
                 Snaps, first reads, red zone, xFP, Next Gen Stats, practice reports, team PROE and pace, defensive and O-line starters, rest days: nflverse

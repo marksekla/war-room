@@ -44,8 +44,9 @@ function RosWaivers({ model, myId }: { model: LeagueModel; myId: number }) {
         const snaps = v.log.map((g) => (g.teamSnaps ? g.snaps / g.teamSnaps : 0));
         const prior = snaps.slice(0, -1);
         const rising = snaps.length >= 3 && snaps[snaps.length - 1] - prior.reduce((a, b) => a + b, 0) / prior.length >= 0.15;
-        const gain = dropId ? model.waiverGain(myId, v.p.id, dropId) : 0;
-        return { v, gain, cuff, rising, score: gain + (cuff?.pts ?? 0) };
+        const plan = dropId ? model.waiverPlan(myId, v.p.id, dropId) : null;
+        const gain = plan?.gain ?? 0;
+        return { v, gain, starts: plan?.starts ?? 0, weeks: plan?.weeks ?? 0, cuff, rising, score: gain + (cuff?.pts ?? 0) };
       })
       .sort((a, b) => b.score - a.score || b.v.rosPoints - a.v.rosPoints)
       .slice(0, 30);
@@ -79,7 +80,10 @@ function RosWaivers({ model, myId }: { model: LeagueModel; myId: number }) {
               </option>
             ))}
           </select>
-          <span className="text-xs text-slate-500">Lineup gain = how many points your best weekly lineup adds through the championship.</span>
+          <span className="text-xs text-slate-500">
+            Lineup gain = extra points in lineups you&apos;d actually start through the championship, compared with streaming the best free agent
+            when you need one.
+          </span>
         </div>
         {faab && (
           <p className="-mt-2 mb-4 text-xs text-slate-400">
@@ -114,7 +118,7 @@ function RosWaivers({ model, myId }: { model: LeagueModel; myId: number }) {
                 </tr>
               </thead>
               <tbody>
-                {rows.map(({ v, gain, cuff, rising }) => {
+                {rows.map(({ v, gain, starts, weeks, cuff, rising }) => {
                   const g = model.gameFor(v.p.team, model.week);
                   const d = g ? model.dvp.get(g.opp)?.get(v.p.pos) : undefined;
                   return (
@@ -145,6 +149,11 @@ function RosWaivers({ model, myId }: { model: LeagueModel; myId: number }) {
                         <span className={Math.abs(gain) < 3 ? "opacity-40" : ""}>
                           <Delta value={gain} />
                         </span>
+                        {weeks > 0 && (
+                          <span className={`block text-[10px] ${starts >= 2 ? "text-slate-400" : "text-slate-600"}`}>
+                            {starts ? `starts ${starts}/${weeks} wks` : "bench only"}
+                          </span>
+                        )}
                         {cuff && cuff.pts >= 0.5 && <span className="block text-[10px] text-violet-300">+{cuff.pts.toFixed(1)} upside</span>}
                       </td>
                       {faab && <td className="font-mono text-amber-200">{faab.suggest(gain) ? `$${faab.suggest(gain)}` : "-"}</td>}
@@ -173,7 +182,8 @@ function RosWaivers({ model, myId }: { model: LeagueModel; myId: number }) {
         )}
       </Panel>
       <p className="text-xs text-slate-500">
-        Faded gains are under 3 points for the rest of the season, so they&apos;re basically even. Handcuffs show what a backup would score per
+        Faded gains are under 3 points for the rest of the season, so they&apos;re basically even. A backup who&apos;d only fill a bye week or wait
+        for an injury scores low here on purpose: you can pick up a fill-in that week instead of holding a bench spot all season. Handcuffs show what a backup would score per
         game if the starter ahead of him misses time; &quot;upside&quot; is those extra points weighted by the chance it happens, and it counts in
         the sort order. Tap a name for snap trends, red zone work, expected points and news. Injured players only show up if they&apos;re due back before your playoffs.
         {faab ? " Bids scale with lineup gain and how big your league bids." : ""} Numbers lag breaking news, so ask the AI agent before you claim

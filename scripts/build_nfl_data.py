@@ -431,7 +431,8 @@ def main() -> None:
         official = {"w": wk_up, "n": len(rows), "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ")}
         if rows:
             inj = merge_official(inj, rows, season, wk_up)
-            official.update({"matched": diag.get("matched"), "teams": diag.get("teams")})
+            official.update({"matched": diag.get("matched"), "teams": diag.get("teams"), "byTeam": diag.get("byTeam"),
+                             "unmatchedSkill": diag.get("unmatchedSkill")})
             log(f"  nfl.com injury report week {wk_up}: {len(rows)} players, {diag.get('teams')} teams, {diag.get('matched')} matched")
         else:
             official["diag"] = diag

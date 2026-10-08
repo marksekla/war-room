@@ -2,6 +2,7 @@
 // These run inside Next.js route handlers so the browser never hits CORS issues
 // and large payloads (like the full player list) get slimmed before shipping.
 
+import { parseOfficialReport } from "@/lib/officialReport";
 import { promises as fs } from "fs";
 import path from "path";
 import type {
@@ -660,4 +661,23 @@ export async function getLeagueActivity(leagueId: string, week: number): Promise
     lastSeasonTrades,
     schedule,
   };
+}
+
+
+// ---------- NFL official injury report (nfl.com) ----------
+
+/** The official injury report for a week, straight from nfl.com. Refreshed every 15 minutes. */
+export function getOfficialInjuries(season: number, week: number) {
+  return cached(`official:${season}:${week}`, 15 * MIN, async () => {
+    const res = await fetch(`https://www.nfl.com/injuries/league/${season}/reg${week}`, {
+      headers: {
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        accept: "text/html,application/xhtml+xml",
+      },
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error(`nfl.com injuries ${res.status}`);
+    const rows = parseOfficialReport(await res.text());
+    return { season, week, fetchedAt: new Date().toISOString(), rows };
+  });
 }

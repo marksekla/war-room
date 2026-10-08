@@ -207,7 +207,8 @@ export default function Availability({ model, myId }: { model: LeagueModel; myId
         )}
         <p className="mt-4 text-xs leading-relaxed text-slate-500">
           Chances come from a model trained on {n ? n.toLocaleString() : "thousands of"} real injury designations from recent seasons (designation, last
-          practice, missed last game, injury type, position), updated with this week&apos;s practice reports and ESPN injury notes. Before the final
+          practice, missed last game, injury type, position), updated with this week&apos;s official NFL injury report (read live from nfl.com
+          every 15 minutes) and ESPN injury notes. A practice day only shows once that day&apos;s report is out. Before the final
           report (usually the day before the game) the numbers are wider estimates. Tap a player for the full breakdown.
         </p>
       </Panel>

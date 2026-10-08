@@ -307,7 +307,15 @@ export const TOOLS: ToolDef[] = [
             const c = m.contingentValue(v.p.id, myId);
             return {
               ...playerSummary(m, v),
-              lineupGainIfAdded: drop ? m.waiverGain(myId, v.p.id, drop.p.id) : null,
+              ...(() => {
+                if (!drop) return { lineupGainIfAdded: null };
+                const plan = m.waiverPlan(myId, v.p.id, drop.p.id);
+                return {
+                  lineupGainIfAdded: plan.gain,
+                  weeksHeWouldStart: `${plan.starts} of ${plan.weeks}`,
+                  gainNote: "Points added to lineups you'd actually start vs streaming the best free agent when needed. Bench-only backups score near zero on purpose.",
+                };
+              })(),
               handcuff: c ? { behind: c.starter, ptsPerGameIfStarterOut: c.ifOutPg, chanceStarterMissesAGamePct: c.missChance, expectedUpsidePts: c.pts } : undefined,
             };
           }),

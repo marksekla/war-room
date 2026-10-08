@@ -4,6 +4,7 @@
 // week by week so trades and waiver moves are judged on how many points your
 // actual starting lineup gains, not on raw rankings.
 
+import { officialReportDay, type OfficialRow } from "./officialReport";
 import type {
   EspnInjury,
   PlayCalib,
@@ -86,6 +87,15 @@ export interface Extras {
   espnProj?: Record<string, StatLine> | null;
   /** Pre-game Sleeper projections for weeks already played (for "projected vs actual"). */
   projHistory?: WeekProjections[] | null;
+  /** The NFL's official injury report for the current week, read live from nfl.com. */
+  official?: OfficialReport | null;
+}
+
+export interface OfficialReport {
+  season: number;
+  week: number;
+  fetchedAt: string;
+  rows: OfficialRow[];
 }
 
 /** Chance a player suits up, with the evidence behind it. */
@@ -799,6 +809,44 @@ export class LeagueModel {
     return res;
   }
 
+  private officialMap: Map<string, OfficialRow> | null = null;
+  /** This player's line on the official injury report, matched by name and team. */
+  officialFor(id: string): OfficialRow | null {
+    const rep = this.extras.official;
+    if (!rep || rep.week !== this.week || !rep.rows?.length) return null;
+    if (!this.officialMap) {
+      const m = new Map<string, OfficialRow>();
+      const byName = new Map<string, Player[]>();
+      for (const p of Object.values(this.players)) {
+        if (!p.team || p.pos === "DEF") continue;
+        const k = normName(p.name);
+        byName.set(k, [...(byName.get(k) ?? []), p]);
+      }
+      // Each table's team: the players in it outvote the heading text.
+      const votes = new Map<number, Map<string, number>>();
+      for (const r of rep.rows) {
+        const c = byName.get(normName(r.name));
+        if (c?.length !== 1) continue;
+        const t = votes.get(r.tbl) ?? new Map<string, number>();
+        t.set(c[0].team!, (t.get(c[0].team!) ?? 0) + 1);
+        votes.set(r.tbl, t);
+      }
+      const tblTeam = new Map<number, string | null>();
+      for (const [tbl, t] of votes) {
+        const [top, n] = [...t.entries()].sort((a, b) => b[1] - a[1])[0];
+        const total = [...t.values()].reduce((a, b) => a + b, 0);
+        tblTeam.set(tbl, n >= 2 && n / total >= 0.6 ? top : null);
+      }
+      for (const r of rep.rows) {
+        const team = tblTeam.get(r.tbl) ?? r.contextTeam;
+        const c = (byName.get(normName(r.name)) ?? []).filter((p) => !team || p.team === team);
+        if (c.length === 1) m.set(c[0].id, r);
+      }
+      this.officialMap = m;
+    }
+    return this.officialMap.get(id) ?? null;
+  }
+
   private computePlayChance(v: PlayerView | undefined): PlayChance {
     const base: PlayChance = { p: 0.98, status: null, official: false, practice: [], injury: null, missedLast: false, note: null, why: "No injury designation." };
     if (!v || !v.p.team) return { ...base, p: 0, why: "Not on an NFL team." };
@@ -815,7 +863,7 @@ export class LeagueModel {
     const calib = this.nfl?.calib?.play ?? DEFAULT_PLAY;
     const status = v.p.injury;
     const e = v.espn;
-    const injury = v.p.injuryPart ?? v.adv?.prac?.inj ?? e?.body ?? null;
+    const injury = v.p.injuryPart ?? this.officialFor(v.p.id)?.injury ?? v.adv?.prac?.inj ?? e?.body ?? null;
 
     // Evidence window: anything after his team's previous game.
     let prevKick = 0;
@@ -845,6 +893,14 @@ export class LeagueModel {
     if (news) for (const d of news.days) days.set(d.day, d.st);
     const pr = v.adv?.prac;
     const prThisWeek = pr && pr.w === this.week ? pr : null;
+    // The official report, read live: its latest practice status belongs to the most recent practice
+    // day whose report should be out by now.
+    const off = this.officialFor(v.p.id);
+    if (off?.practice) {
+      const d = officialReportDay(v.p.team, kick, now);
+      if (d) days.set(d, off.practice);
+      else if (!days.size) days.set("Latest", off.practice);
+    }
     // A practice can't be reported before it happens: drop any day later than what's possible right now.
     for (const d of [...days.keys()]) if (!practiceDayHappened(d, kick, now)) days.delete(d);
     if (prThisWeek?.st && !days.size) days.set("Latest", prThisWeek.st);
@@ -852,8 +908,8 @@ export class LeagueModel {
     const last = practice.length ? practice[practice.length - 1].st : null;
 
     // Is the final game-status report out? (nflverse game status, or ESPN noting the designation.)
-    const official = !!(prThisWeek?.rep) || !!(news && (news.listed || news.ruledOut) && kick - eDate < 3 * 86_400_000);
-    const desig = prThisWeek?.rep ?? (news?.ruledOut ? "Out" : status);
+    const official = !!off?.game || !!(prThisWeek?.rep) || !!(news && (news.listed || news.ruledOut) && kick - eDate < 3 * 86_400_000);
+    const desig = off?.game ?? prThisWeek?.rep ?? (news?.ruledOut ? "Out" : status);
     const hoursToKick = (kick - now) / 3_600_000;
 
     let p: number;
@@ -1846,6 +1902,54 @@ export class LeagueModel {
     return round1(this.teamRos(after) - this.teamRos(before));
   }
 
+  private streamCache = new Map<number, Map<string, { id: string; val: number }[]>>();
+  /** Best two free agents at each position for a week (what you could stream in for that week). */
+  private streamers(week: number) {
+    let m = this.streamCache.get(week);
+    if (!m) {
+      m = new Map();
+      for (const v of this.views.values()) {
+        if (v.ownerRosterId != null || !v.p.team) continue;
+        const val = this.expected(v.p.id, week);
+        if (val <= 0) continue;
+        const l = m.get(v.p.pos) ?? [];
+        l.push({ id: v.p.id, val });
+        l.sort((a, b) => b.val - a.val);
+        if (l.length > 2) l.length = 2;
+        m.set(v.p.pos, l);
+      }
+      this.streamCache.set(week, m);
+    }
+    return m;
+  }
+
+  /**
+   * What a waiver move is really worth: extra points in the lineups you'd actually start, week by
+   * week through the championship, compared with simply streaming the best free agent at a spot when
+   * you need one. A backup who only fills one bye week, or only matters if your starter gets hurt,
+   * barely moves this, because you could grab a fill-in that week anyway. A player who earns starts does.
+   */
+  waiverPlan(myId: number, addId: string, dropId: string) {
+    const me = this.team(myId)!;
+    const before = me.players;
+    const after = before.filter((id) => id !== dropId).concat(addId);
+    let gain = 0;
+    let starts = 0;
+    const weeks = this.remainingWeeks();
+    for (const w of weeks) {
+      // A streamer pick costs a little (waiver priority, the guess); count it at 90%.
+      const stream = [...this.streamers(w).values()].map((l) => l.find((x) => x.id !== addId)).filter((x): x is { id: string; val: number } => !!x);
+      const sv = new Map(stream.map((x) => [x.id, x.val * 0.9]));
+      const val = (id: string) => sv.get(id) ?? this.expected(id, w);
+      const ids = (r: string[]) => r.concat(stream.map((x) => x.id).filter((x) => !r.includes(x)));
+      const b = this.lineup(ids(before), val);
+      const a = this.lineup(ids(after), val);
+      gain += a.total - b.total;
+      if (a.filled.some((f) => f.id === addId) && this.expected(addId, w) > 0) starts++;
+    }
+    return { gain: round1(gain), starts, weeks: weeks.length };
+  }
+
   dropCandidates(myId: number) {
     const me = this.team(myId)!;
     const lu = this.lineup(me.players, (id) => this.views.get(id)?.valuePg ?? 0);
@@ -2244,29 +2348,53 @@ export class LeagueModel {
     // 2) Lineup-lock and injury alerts.
     for (const w of ss.warnings.slice(0, 2)) items.push({ kind: "alert", text: w, tab: "lineup", tone: "amber" });
 
-    // 3) Best waiver move.
-    const drop = this.dropCandidates(myId)[0];
-    if (drop) {
-      const best = this.freeAgents("ALL")
-        .slice(0, 15)
-        .map((v) => ({ v, gain: this.waiverGain(myId, v.p.id, drop.p.id) }))
-        .sort((a, b) => b.gain - a.gain)[0];
-      if (best && best.gain >= 3)
-        items.push({
-          kind: "waiver",
-          text: `Add ${best.v.p.name}, drop ${drop.p.name} (+${best.gain.toFixed(0)} pts rest of season).`,
-          tab: "waivers",
-          playerId: best.v.p.id,
-          tone: "lime",
-        });
-    }
+    // 3) Best waiver move: the add that earns real starts, not a bench body (see waiverPlan).
+    const drops = this.dropCandidates(myId)
+      .filter((d) => (this.contingentValue(d.p.id, myId)?.pts ?? 0) < 2) // keep real handcuff stashes
+      .slice(0, 3);
+    let best: { v: PlayerView; drop: PlayerView; plan: ReturnType<LeagueModel["waiverPlan"]> } | null = null;
+    for (const v of this.freeAgents("ALL").filter((x) => !["K", "DEF"].includes(x.p.pos)).slice(0, 25))
+      for (const drop of drops) {
+        // Never cut someone the trade market or the experts rate clearly above the pickup.
+        if (drop.market && v.market && drop.market.value > v.market.value * 1.1) continue;
+        if (drop.market && !v.market) continue;
+        if (drop.ecrRos != null && drop.p.pos === v.p.pos && (v.ecrRos == null || drop.ecrRos < v.ecrRos * 0.85)) continue;
+        const plan = this.waiverPlan(myId, v.p.id, drop.p.id);
+        if (!best || plan.gain > best.plan.gain) best = { v, drop, plan };
+      }
+    if (best && best.plan.gain >= 3 && best.plan.starts >= 2)
+      items.push({
+        kind: "waiver",
+        text: `Add ${best.v.p.name}, drop ${best.drop.p.name}: he'd start about ${best.plan.starts} of your ${best.plan.weeks} remaining weeks (+${best.plan.gain.toFixed(0)} pts in lineups you'd actually play).`,
+        tab: "waivers",
+        playerId: best.v.p.id,
+        tone: "lime",
+      });
     // 4) Bye-week or injury holes coming up.
     const core = this.lineup(me.players, (id) => this.views.get(id)?.valuePg ?? 0).filled;
-    for (let w = this.week + 1; w <= Math.min(this.lastWeek, this.week + 3); w++) {
+    for (let w = this.week + 1; w <= Math.min(this.lastWeek, this.week + 2); w++) {
       const lu = this.lineup(me.players, (id) => this.expected(id, w));
-      const weak = lu.filled.filter((f, i) => (core[i]?.val ?? 0) >= 1 && (!f.id || f.val < 1)).map((f) => f.slot.replace("_", " "));
+      const weak = lu.filled.filter((f, i) => (core[i]?.val ?? 0) >= 1 && (!f.id || f.val < 1));
       if (weak.length) {
-        items.push({ kind: "bye", text: `Week ${w}: no real starter at ${weak.join(", ")}. Plan a pickup or trade now.`, tab: "waivers", tone: "amber" });
+        // Name the fill-in for that week. Single-week holes are cheapest to stream right before the week.
+        const picks = weak
+          .map((f) => {
+            const pos = (f.slot in FLEX_SLOTS ? FLEX_SLOTS[f.slot] : [f.slot]) as string[];
+            const top = pos
+              .flatMap((p) => this.streamers(w).get(p) ?? [])
+              .sort((a, b) => b.val - a.val)[0];
+            return top ? `${this.views.get(top.id)?.p.name} (${top.val.toFixed(1)} proj)` : null;
+          })
+          .filter(Boolean);
+        const slots = weak.map((f) => f.slot.replace("_", " ")).join(", ");
+        items.push({
+          kind: "bye",
+          text: `Week ${w}: no real starter at ${slots}.${picks.length ? ` Best free agent that week: ${picks.join(", ")}.` : " Check waivers for a fill-in."} ${
+            w === this.week + 1 ? "Claim one this week." : "Grab one the week before; no need to hold a bench spot now."
+          }`,
+          tab: "waivers",
+          tone: "amber",
+        });
         break;
       }
     }
