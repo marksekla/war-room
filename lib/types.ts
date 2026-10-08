@@ -222,7 +222,9 @@ export interface NflData {
   calib?: Calibration | null;
   /** FantasyPros expert consensus (PPR). Keys are Sleeper ids, team abbreviations for defenses,
    * or "n:<normalized name>:<team>" when no id match exists. ros = [rank, std dev]. */
-  ecr?: { date: string; week: number | null; ros: Record<string, [number, number | null]>; wk: Record<string, number> } | null;
+  ecr?: { date: string; week: number | null; ros: Record<string, [number, number | null]>; wk: Record<string, number>; src?: string } | null;
+  /** FantasyPros consensus projections for one week: stat lines keyed by Sleeper id (or n:name:team). */
+  fpProj?: { week: number; date: string; lines: Record<string, Record<string, number>> } | null;
   /** Practice participation changes this week, by gsis id: { Wed: "DNP", Thu: "LP" }. */
   pracLog?: { w: number; p: Record<string, Record<string, "DNP" | "LP" | "FP">> } | null;
 }
@@ -242,10 +244,10 @@ export interface Calibration {
   n: number; // player-weeks used
   weights: Record<string, { proj: number; last3: number; ppg: number; xfp: number }>;
   weightsNoProj?: Record<string, { last3: number; ppg: number; xfp: number }>;
-  projBlend: { sleeper: number; espn: number } | null;
+  projBlend: { sleeper: number; espn: number; fantasypros?: number } | null;
   sd: Record<string, number>; // weekly PPR prediction error (std dev) by position
   avail: Record<string, number>; // chance a starter plays next game, by position
-  accuracy: { warRoom?: number; sleeper?: number; espn?: number; n?: number };
+  accuracy: { warRoom?: number; blend?: number; sleeper?: number; espn?: number; fantasypros?: number; n?: number };
   /** How strongly Vegas implied totals and defense-vs-position scale a baseline, by position. */
   matchup?: Record<string, { vegas: number; dvp: number }>;
   /** How much FantasyCalc market value should pull a player's value, by position (learned from snapshots). */

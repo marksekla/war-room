@@ -19,16 +19,15 @@ import json
 import math
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-try:  # self-calibration lives next to this file
-    from calibrate import calibrate
-except ImportError:  # pragma: no cover
-    sys.path.append(os.path.dirname(__file__))
-    from calibrate import calibrate
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from calibrate import calibrate  # noqa: E402  self-calibration lives next to this file
+import fantasypros as fp  # noqa: E402
 
 NFLVERSE = "https://github.com/nflverse/nflverse-data/releases/download"
 FFOPP = "https://github.com/ffverse/ffopportunity/releases/download/latest-data"
@@ -179,14 +178,8 @@ def norm_name(n) -> str:
     return re.sub(r"[^a-z]", "", s)
 
 
-def expert_rankings(ids: pd.DataFrame, games: pd.DataFrame, season: int, history: dict) -> tuple[dict | None, dict]:
-    """FantasyPros expert consensus rankings (rest of season + this week, PPR), via the free
-    DynastyProcess mirror. Also saves a weekly snapshot so calibrate.py can learn how much
-    expert rankings should count (same idea as the FantasyCalc snapshots)."""
-    history = {k: v for k, v in (history or {}).items() if int(k) >= season - 1}
-    ecr = read(FPECR)
-    if ecr.empty or ids.empty:
-        return None, history
+def fp_maps(ids: pd.DataFrame) -> tuple[dict, dict]:
+    """FantasyPros id -> Sleeper id, and -> nflverse gsis id."""
     fp_to_sid, fp_to_gsis = {}, {}
     for r in ids[["fantasypros_id", "sleeper_id", "gsis_id"]].itertuples(index=False):
         if pd.isna(r.fantasypros_id):
@@ -196,47 +189,109 @@ def expert_rankings(ids: pd.DataFrame, games: pd.DataFrame, season: int, history
             fp_to_sid[k] = str(int(float(r.sleeper_id)))
         if isinstance(r.gsis_id, str):
             fp_to_gsis[k] = r.gsis_id
-    date = str(ecr.scrape_date.dropna().max())
+    return fp_to_sid, fp_to_gsis
+
+
+def upcoming_week(games: pd.DataFrame, season: int) -> int | None:
+    try:
+        w = games[(games.season == season) & (games.game_type == "REG") & games.result.isna()].week.min()
+        return int(w) if not pd.isna(w) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def expert_rankings(ids: pd.DataFrame, games: pd.DataFrame, season: int, history: dict) -> tuple[dict | None, dict]:
+    """FantasyPros expert consensus rankings (rest of season + this week, PPR).
+
+    Read fresh from fantasypros.com (updated daily). Any page that can't be read falls back to
+    the DynastyProcess mirror, which is only refreshed about once a week. Also saves a weekly
+    snapshot so calibrate.py can learn how much expert rankings should count."""
+    history = {k: v for k, v in (history or {}).items() if int(k) >= season - 1}
+    if ids.empty:
+        return None, history
+    fp_to_sid, fp_to_gsis = fp_maps(ids)
+    nxt = upcoming_week(games, season)
     gs = games[(games.season == season) & (games.game_type == "REG")] if not games.empty else games
-    # Weekly ranks belong to the first week with games still to come after the scrape date.
-    week = None
-    if not gs.empty:
-        after = gs[gs.gameday.astype(str) >= date]
-        if len(after):
-            week = int(after.week.min())
-    out = {"date": date, "week": week, "ros": {}, "wk": {}}
+
+    # entries: (page, fantasypros id, name, team, rank, sd)
+    entries, weeks, sources = [], {}, {}
+    for page in ECR_PAGES:
+        d = fp.rankings(page)
+        if d and d["players"]:
+            for p in d["players"]:
+                entries.append((page, p["fpid"], p["name"], p["team"], p["rank"], p["sd"]))
+            weeks[page] = d["week"]
+            sources[page] = "fantasypros"
+        time.sleep(0.6)
+    missing = [p for p in ECR_PAGES if p not in sources]
+    dp_date = None
+    if missing:
+        ecr = read(FPECR)
+        if not ecr.empty:
+            dp_date = str(ecr.scrape_date.dropna().max())
+            dp_week = None
+            if not gs.empty:
+                after = gs[gs.gameday.astype(str) >= dp_date]
+                if len(after):
+                    dp_week = int(after.week.min())
+            for r in ecr.itertuples(index=False):
+                page = str(r.fp_page).rsplit("/", 1)[-1].replace(".php", "")
+                if page not in missing:
+                    continue
+                entries.append((page, str(r.id).split(".")[0], r.player, r.team, num(r.ecr, 1), num(r.sd, 1)))
+                weeks[page] = dp_week
+                sources[page] = "dynastyprocess"
+    if not entries:
+        return None, history
+
+    # Weekly ranks belong to one week. FantasyPros says which; otherwise it's the next week with games to play.
+    wk_week = next((weeks[p] for p in ECR_PAGES if ECR_PAGES[p][0] == "wk" and weeks.get(p)), None)
+    if wk_week is None:
+        wk_week = nxt if all(sources.get(p) == "fantasypros" for p in ECR_PAGES if ECR_PAGES[p][0] == "wk") else None
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    date = today if len(missing) < len(ECR_PAGES) else (dp_date or today)
+    out = {"date": date, "week": wk_week, "ros": {}, "wk": {}, "src": "fantasypros" if not missing else ("mixed" if len(missing) < len(ECR_PAGES) else "dynastyprocess")}
     snap = {}
-    for r in ecr.itertuples(index=False):
-        page = str(r.fp_page).rsplit("/", 1)[-1].replace(".php", "")
-        if page not in ECR_PAGES:
-            continue
+    for page, fid, name, tm, rank, sd in entries:
         kind, pos = ECR_PAGES[page]
-        rank = num(r.ecr, 1)
         if rank is None:
             continue
-        fid = str(r.id).split(".")[0]
+        rank = round(float(rank), 1)
         if pos == "DEF":
-            key = team(r.team)
+            key = team(tm)
         else:
-            key = fp_to_sid.get(fid) or f"n:{norm_name(r.player)}:{team(r.team)}"
+            key = fp_to_sid.get(fid) or f"n:{norm_name(name)}:{team(tm) or 'FA'}"
         if not key:
             continue
         if kind == "ros":
-            out["ros"][key] = [rank, num(r.sd, 1)]
+            out["ros"][key] = [rank, None if sd is None else round(float(sd), 1)]
             g = fp_to_gsis.get(fid)
             if g and pos in ("QB", "RB", "WR", "TE"):
                 snap[g] = rank
-        else:
+        elif weeks.get(page) == wk_week:  # a stale page from another week is left out
             out["wk"][key] = rank
     # Snapshot ROS ranks for the next unplayed week (for learning their weight later).
-    try:
-        upcoming = gs[gs.result.isna()]
-        if snap and not upcoming.empty:
-            history.setdefault(str(season), {})[str(int(upcoming.week.min()))] = snap
-    except Exception:  # noqa: BLE001
-        pass
-    log(f"  expert rankings {date}: {len(out['ros'])} rest-of-season, {len(out['wk'])} weekly (week {week})")
+    if snap and nxt:
+        history.setdefault(str(season), {})[str(nxt)] = snap
+    log(f"  expert rankings {date} ({out['src']}): {len(out['ros'])} rest-of-season, {len(out['wk'])} weekly (week {wk_week})")
     return out, history
+
+
+def consensus_projections(ids: pd.DataFrame, week: int | None) -> dict | None:
+    """FantasyPros consensus projections for the coming week, as stat lines the app scores with league settings."""
+    if not week or ids.empty:
+        return None
+    fp_to_sid, _ = fp_maps(ids)
+    by_pos = fp.projections(week)
+    if not by_pos:
+        return None
+    lines = {}
+    for pos, rows in by_pos.items():
+        for r in rows:
+            key = fp_to_sid.get(r["fpid"] or "") or f"n:{norm_name(r['name'])}:{team(r['team']) or 'FA'}"
+            lines[key] = {k: round(v, 2) for k, v in r["s"].items() if v}
+    log(f"  FantasyPros consensus projections week {week}: {len(lines)} players ({', '.join(f'{p} {len(v)}' for p, v in by_pos.items())})")
+    return {"week": week, "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"), "lines": lines}
 
 
 DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -625,7 +680,7 @@ def main() -> None:
         "updated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "season": season,
         "throughWeek": max_week,
-        "attribution": "nflverse (CC-BY 4.0), FTN Data via nflverse (CC-BY-SA 4.0), ffopportunity, DynastyProcess",
+        "attribution": "nflverse (CC-BY 4.0), FTN Data via nflverse (CC-BY-SA 4.0), ffopportunity, DynastyProcess, FantasyPros expert consensus",
         "teams": teams,
         "players": out_players,
         "games": upcoming,
@@ -649,11 +704,12 @@ def main() -> None:
             prev = None
     data["marketHistory"] = snapshot_market(history, season, games)
     data["ecr"], data["ecrHistory"] = expert_rankings(ids, games, season, ecr_history)
+    nxt = upcoming_week(games, season) if not games.empty else None
     try:
-        nxt = games[(games.season == season) & (games.game_type == "REG") & games.result.isna()].week.min()
-        nxt = int(nxt) if not pd.isna(nxt) else None
-    except Exception:  # noqa: BLE001
-        nxt = None
+        data["fpProj"] = consensus_projections(ids, nxt)
+    except Exception as e:  # noqa: BLE001 - a bonus source, never block the build
+        log(f"FantasyPros projections failed ({e.__class__.__name__}: {e})")
+        data["fpProj"] = None
     data["pracLog"] = practice_log(inj, old_prac, nxt)
     try:
         data["calib"] = (

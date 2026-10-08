@@ -150,7 +150,7 @@ function RosWaivers({ model, myId }: { model: LeagueModel; myId: number }) {
                       {faab && <td className="font-mono text-amber-200">{faab.suggest(gain) ? `$${faab.suggest(gain)}` : "-"}</td>}
                       <td className="font-mono">{v.rosPoints.toFixed(0)}</td>
                       <td className="mhide font-mono">{v.last3.toFixed(1)}</td>
-                      <td className="font-mono text-cyan-200">{v.projNext?.toFixed(1) ?? "-"}</td>
+                      <td className="font-mono text-cyan-200">{model.gameFor(v.p.team, model.week) ? model.projection(v.p.id).toFixed(1) : "-"}</td>
                       <td><Meter value={v.snapShare} /></td>
                       <td><Meter value={v.targetShare} max={0.4} tone="violet" /></td>
                       <td className="mhide"><Meter value={v.carryShare} max={0.8} tone="lime" /></td>

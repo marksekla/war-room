@@ -10,7 +10,8 @@ Sync any Sleeper league and get:
 - **Streamers and FAAB** – one-week QB/TE/K/DEF pickups by matchup, and suggested FAAB bids tuned to how your league bids.
 - **Player search** – find anyone from the header and open his card.
 - **Are they playing?** – every fantasy-relevant player on the injury report with his chance to suit up, injury, matchup and day-by-day practice report. The chance comes from a model trained on recent seasons' official injury reports (designation, last practice, missed last game, injury type, position) and updates with this week's practice reports and ESPN injury notes.
-- **Expert consensus** – FantasyPros rest-of-season and weekly consensus rankings (free DynastyProcess mirror) feed player values, team needs, the trade check and start/sit.
+- **Expert consensus** – FantasyPros rest-of-season and weekly consensus rankings, read fresh from fantasypros.com (DynastyProcess mirror as backup), feed player values, team needs, the trade check and start/sit. Rest-of-season values lean on the consensus: by default it carries about half of each player's value.
+- **Three projection sources** – Sleeper, ESPN and FantasyPros consensus projections are averaged. Independent multi-season studies find an average of sources beats nearly every single source, and that the "best" source changes year to year, so learned weights are pulled halfway toward an even split.
 - **Playoff odds** – simulates the rest of the season thousands of times on your league's real schedule, then the bracket: every team's chance to make the playoffs, get a bye and win the title. The trade simulator shows how a deal moves your odds.
 - **Saved AI chats** – conversations stay after a refresh (stored in your browser only).
 - **Command dashboard** – this week's head-to-head with win odds, a live league wire of every add, drop and trade, your roster with usage (snap %, target share, carry share), next matchup, value over replacement, rest-of-season points, a week-by-week outlook to the championship, standings, and every team's needs.
@@ -87,10 +88,10 @@ These are models, not crystal balls. They lag breaking news, which is why the ag
 
 ## It gets better every week
 
-When a new NFL week finishes, the nightly job (`scripts/calibrate.py`) replays last season and this season player by player: what did Sleeper and ESPN project, what was his season average, last 3 games and expected points from usage, and what did he actually score? It then refits:
+When a new NFL week finishes, the nightly job (`scripts/calibrate.py`) replays last season and this season player by player: what did Sleeper, ESPN and FantasyPros consensus project, what was his season average, last 3 games and expected points from usage, and what did he actually score? It then refits:
 
 - how much to trust each input, by position (projections vs recent form vs season average vs expected points)
-- how to weigh Sleeper against ESPN projections
+- how to weigh Sleeper, ESPN and FantasyPros projections (learned, then pulled halfway toward equal)
 - how big a typical miss is at each position, which drives the win probability
 - how often starters at each position miss the next game, which drives depth value in trades
 - how much Vegas implied team totals and defense-vs-position should move each position's projection
@@ -108,6 +109,7 @@ It also tests itself honestly (trained on last season, scored on this season's g
 | Transactions and trade history (this and last season) | Sleeper API | 5 min |
 | Weekly stats, projections, trending adds | Sleeper (public, undocumented endpoints) | 10 min to 2 h |
 | Second projection source | ESPN fantasy (public, undocumented) | 2 h |
+| Third projection source: consensus of many sites | FantasyPros projections pages | twice daily |
 | Injury designations | ESPN injuries feed + Sleeper | 15 min |
 | Player news | ESPN fantasy news (Rotowire blurbs) | 20 min |
 | Schedule, kickoff, spreads, totals | ESPN scoreboard | 30 min |
@@ -115,7 +117,7 @@ It also tests itself honestly (trained on last season, scored on this season's g
 | First-read targets | FTN Data via nflverse | twice daily |
 | Expected fantasy points (xFP) | [ffopportunity](https://github.com/ffverse/ffopportunity) | twice daily |
 | Player ID matching | [DynastyProcess](https://github.com/dynastyprocess/data) | twice daily |
-| Expert consensus rankings (FantasyPros ROS + weekly, PPR) | [DynastyProcess mirror](https://github.com/dynastyprocess/data) | weekly (checked twice daily) |
+| Expert consensus rankings (FantasyPros ROS + weekly, PPR) | FantasyPros rankings pages, [DynastyProcess mirror](https://github.com/dynastyprocess/data) as backup | twice daily (Sunday morning too) |
 | Past-week projections (for projected vs actual) | Sleeper | cached 12 h |
 | Trade market values | [FantasyCalc](https://fantasycalc.com) | 6 h |
 | Kickoff weather | [Open-Meteo](https://open-meteo.com) | 1 h |
@@ -123,9 +125,9 @@ It also tests itself honestly (trained on last season, scored on this season's g
 
 Data is cached on the server (and at Vercel's edge) so the app stays light on these services. Every optional source fails gracefully: if one is down, the rest of the app keeps working.
 
-Not available for free (the agent searches the web when it matters): route participation, PFF grades, CB shadow matchups, FantasyPros consensus rankings. Betting player props are left out on purpose.
+Not available for free (the agent searches the web when it matters): route participation, PFF grades, CB shadow matchups. Betting player props are left out on purpose.
 
-**Attribution:** nflverse data is CC-BY 4.0. FTN charting data is CC-BY-SA 4.0 (FTN Data via nflverse). Thanks to the nflverse, ffverse and DynastyProcess maintainers.
+**Attribution:** nflverse data is CC-BY 4.0. FTN charting data is CC-BY-SA 4.0 (FTN Data via nflverse). Thanks to the nflverse, ffverse and DynastyProcess maintainers. Expert consensus rankings and projections: FantasyPros. Check FantasyPros' terms before any paid version of War Room; it would likely need a licensed data feed.
 
 ## Project structure
 

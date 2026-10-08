@@ -310,7 +310,7 @@ export default function Dashboard({
                     <td className="mhide font-mono">{v.ppg.toFixed(1)}</td>
                     <td className="font-mono">{v.last3.toFixed(1)}</td>
                     <td className="font-mono text-cyan-200">
-                      {v.projNext?.toFixed(1) ?? "-"}
+                      {model.gameFor(v.p.team, model.week) ? model.projection(v.p.id).toFixed(1) : "-"}
                     </td>
                     <td>
                       <Meter value={v.snapShare} />

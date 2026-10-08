@@ -203,7 +203,7 @@ export default function StartSit({ model, myId }: { model: LeagueModel; myId: nu
         </div>
       </Panel>
       <p className="text-xs text-slate-500">
-        Expected points blend Sleeper and ESPN projections, FantasyPros weekly expert ranks, season-long usage, matchup and Vegas, times each player&apos;s chance to play (learned from past injury reports plus this week&apos;s practice reports and news). When a teammate is out, projections that already react to the depth chart count more. -2D means two of the opponent&apos;s defensive starters are out; OL-2 means two of his own linemen are out (hover or tap a player for names). ≋ ☂ ❄ mark wind, rain/snow or cold at kickoff. Check final news before lock; the AI agent can do that for you.
+        Expected points blend Sleeper, ESPN and FantasyPros consensus projections, FantasyPros weekly expert ranks, season-long usage, matchup and Vegas, times each player&apos;s chance to play (learned from past injury reports plus this week&apos;s practice reports and news). When a teammate is out, projections that already react to the depth chart count more. -2D means two of the opponent&apos;s defensive starters are out; OL-2 means two of his own linemen are out (hover or tap a player for names). ≋ ☂ ❄ mark wind, rain/snow or cold at kickoff. Check final news before lock; the AI agent can do that for you.
       </p>
     </div>
   );

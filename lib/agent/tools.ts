@@ -31,7 +31,7 @@ export function playerSummary(m: LeagueModel, v: PlayerView, detail = false) {
     games: v.games,
     ppg: v.ppg,
     last3: v.last3,
-    projThisWeek: v.projNext,
+    projThisWeek: m.gameFor(v.p.team, m.week) ? m.projection(v.p.id) : 0,
     valuePerGame: v.valuePg,
     valueOverReplacement: v.vorp,
     restOfSeasonPts: v.rosPoints,
@@ -91,7 +91,7 @@ export function playerSummary(m: LeagueModel, v: PlayerView, detail = false) {
         }
       : "No nflverse data for this player yet.",
     espnInjury: v.espn ? { status: v.espn.status, updated: v.espn.date, comment: v.espn.short, returnDate: v.espn.returnDate } : null,
-    projectionSources: { sleeper: v.projSleeper, espn: v.projEspn, blended: v.projNext },
+    projectionSources: { sleeper: v.projSleeper, espn: v.projEspn, fantasyProsConsensus: v.projFp, rawBlend: v.projNext, warRoom: m.projection(v.p.id), note: "warRoom is the projection to quote; it adds usage, matchup, Vegas and chance to play" },
     thisWeekContext: weekContext(m, v, m.week),
     teamEnvironment: teamEnvSummary(m, v.p.team),
     note: "oppRankVsPos: 1 = stingiest defense vs this position, 32 = most generous (league scoring, this season).",

@@ -187,7 +187,14 @@ export default function Settings({ onClose }: { onClose: () => void }) {
             <summary className="cursor-pointer select-none text-slate-300">Data sources and freshness</summary>
             <ul className="mt-2 space-y-1">
               <li>League, rosters, scoring, matchups, transactions: Sleeper (1-5 minutes behind)</li>
-              <li>Projections: Sleeper and ESPN, averaged</li>
+              <li>
+                Projections: Sleeper, ESPN and FantasyPros consensus, averaged
+                {nfl?.fpProj ? ` (FantasyPros week ${nfl.fpProj.week}, ${nfl.fpProj.date})` : nfl ? " (FantasyPros not loaded yet, using Sleeper and ESPN)" : ""}
+              </li>
+              <li>
+                Expert rankings (rest of season and weekly): FantasyPros consensus
+                {nfl?.ecr ? ` (updated ${nfl.ecr.date})` : " (not loaded)"}
+              </li>
               <li>Injury designations: ESPN (every 15 minutes) layered on Sleeper</li>
               <li>
                 Snaps, first reads, red zone, xFP, Next Gen Stats, practice reports, team PROE and pace, defensive and O-line starters, rest days: nflverse
@@ -204,13 +211,15 @@ export default function Settings({ onClose }: { onClose: () => void }) {
                   <>
                     {" "}
                     Average miss per player this season: War Room {nfl.calib.accuracy.warRoom} pts
+                    {nfl.calib.accuracy.blend != null ? `, the three sources averaged ${nfl.calib.accuracy.blend}` : ""}
+                    {nfl.calib.accuracy.fantasypros != null ? `, FantasyPros ${nfl.calib.accuracy.fantasypros}` : ""}
                     {nfl.calib.accuracy.sleeper != null ? `, Sleeper ${nfl.calib.accuracy.sleeper}` : ""}
                     {nfl.calib.accuracy.espn != null ? `, ESPN ${nfl.calib.accuracy.espn}` : ""} (tested on games it hadn&apos;t seen).
                   </>
                 )}
               </p>
             )}
-            <p className="mt-2">Data: nflverse (CC-BY 4.0), FTN Data via nflverse (CC-BY-SA 4.0), ffopportunity, DynastyProcess.</p>
+            <p className="mt-2">Data: nflverse (CC-BY 4.0), FTN Data via nflverse (CC-BY-SA 4.0), ffopportunity, DynastyProcess, FantasyPros expert consensus.</p>
           </details>
         </div>
 

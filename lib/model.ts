@@ -64,10 +64,14 @@ export interface PlayerView {
   /** This week's projection from each source (league scoring). projNext is their average. */
   projSleeper: number | null;
   projEspn: number | null;
+  /** FantasyPros consensus projection (an average of many sites), league scoring. */
+  projFp: number | null;
   /** FantasyPros expert consensus: rest-of-season positional rank (and spread), this week's rank. */
   ecrRos: number | null;
   ecrSd: number | null;
   ecrWeek: number | null;
+  /** This week's blended projection with the matchup and Vegas effects taken back out (so they're applied once). */
+  projNeutral: number | null;
   /** Points per game the expert consensus rank implies (this league's scoring). */
   ecrPg?: number | null;
 }
@@ -294,6 +298,13 @@ export class LeagueModel {
     return { ros, wk };
   }
 
+  /** FantasyPros consensus stat line for this week (only when it was made for this week). */
+  private fpLine(p: Player): Record<string, number> | null {
+    const f = this.nfl?.fpProj;
+    if (!f || f.week !== this.week || p.pos === "DEF" || p.pos === "K") return null;
+    return f.lines[p.id] ?? f.lines[`n:${normName(p.name)}:${p.team ?? "FA"}`] ?? null;
+  }
+
   /**
    * Sleeper's injury field can lag a few hours. ESPN's injury feed refreshes every
    * 15 minutes, so a recent ESPN game designation wins when it is more serious.
@@ -469,12 +480,19 @@ export class LeagueModel {
       const projSleeper = next ? scoreLine(next.s, this.scoring) : null;
       const espnLine = raw.espnId ? this.extras.espnProj?.[raw.espnId] : undefined;
       const projEspn = espnLine ? scoreLine(espnLine, this.scoring) : null;
-      // Two projection sources averaged beat either one alone.
-      const pb = this.extras.nfl?.calib?.projBlend ?? { sleeper: 0.5, espn: 0.5 };
-      const projNext =
-        projSleeper != null && projEspn != null && projSleeper > 0 && projEspn > 0
-          ? (pb.sleeper * projSleeper + pb.espn * projEspn) / (pb.sleeper + pb.espn || 1)
-          : projSleeper ?? projEspn;
+      const fpLine = this.fpLine(p);
+      const projFp = fpLine ? scoreLine(fpLine, this.scoring) : null;
+      // Independent studies (Fantasy Football Analytics, 2015-2025) find an average of projection
+      // sources beats nearly every single source. Weights are learned by calibrate.py and pulled
+      // halfway toward equal, because the "best" source changes from year to year.
+      const projNext = blendProjections(
+        [
+          ["sleeper", projSleeper],
+          ["espn", projEspn],
+          ["fantasypros", projFp],
+        ],
+        this.extras.nfl?.calib?.projBlend ?? null
+      );
 
       // Rest-of-season value should not depend on this week's opponent: strip the matchup and
       // Vegas effects back out of this week's projection before it feeds the per-game value.
@@ -548,6 +566,8 @@ export class LeagueModel {
         espn,
         projSleeper: projSleeper == null ? null : round1(projSleeper),
         projEspn: projEspn == null ? null : round1(projEspn),
+        projFp: projFp == null ? null : round1(projFp),
+        projNeutral: projRos == null ? null : round1(projRos),
         ecrRos: ecr.ros?.[0] ?? null,
         ecrSd: ecr.ros?.[1] ?? null,
         ecrWeek: ecr.wk,
@@ -682,11 +702,12 @@ export class LeagueModel {
     const shift = this.roleShift.get(id);
     if (shift && week >= shift.fromWeek) mult *= shift.mult;
     let base = v.valuePg;
-    if (ahead === 0 && v.projNext != null && v.projNext > 0) {
+    if (ahead === 0 && v.projNeutral != null && v.projNeutral > 0) {
       // Projections react to depth-chart news within hours; lean on them harder when a teammate
-      // at the same position is unlikely to play (his work has to go somewhere).
+      // at the same position is unlikely to play (his work has to go somewhere). The matchup and
+      // Vegas factors below are applied once, so use the projection with them taken out.
       const w = this.teammateOut(id) ? 0.85 : v.ecrWeek != null ? 0.55 : 0.6;
-      base = w * v.projNext + (1 - w) * v.valuePg;
+      base = w * v.projNeutral + (1 - w) * v.valuePg;
       // Expert consensus for this exact week, when it's current, as a third opinion.
       if (v.ecrWeek != null) base = 0.85 * base + 0.15 * this.weeklyRankPoints(v.p.pos, v.ecrWeek);
     }
@@ -872,6 +893,15 @@ export class LeagueModel {
     };
   }
 
+  /**
+   * War Room's projection for a player in a week: the one number shown everywhere (player card,
+   * start/sit, trades, waivers, AI agent). Blends Sleeper, ESPN and FantasyPros, season-long usage,
+   * matchup and Vegas, times his chance to play.
+   */
+  projection(id: string, week = this.week): number {
+    return round1(this.expected(id, week));
+  }
+
   remainingWeeks(): number[] {
     const out: number[] = [];
     for (let w = this.week; w <= this.lastWeek; w++) out.push(w);
@@ -961,7 +991,7 @@ export class LeagueModel {
   }
 
   /**
-   * FantasyPros rest-of-season expert consensus (dozens of analysts) as a second prior. Ranks map
+   * FantasyPros rest-of-season expert consensus (100+ analysts, refreshed daily) as a second prior. Ranks map
    * to points per game by position through log(rank), fit on this league's own numbers, then
    * blend in with a learned weight (scripts/calibrate.py) or a sensible default. This is what
    * keeps rest-of-season values from swinging on one or two big weeks.
@@ -993,7 +1023,9 @@ export class LeagueModel {
         // Scaled up for missed games, but never above what the #1 player at the position implies.
         const implied = Math.min(Math.max(0, a + b * Math.log(Math.max(1, v.ecrRos))) * this.healthyFactor(v), a * 1.05);
         v.ecrPg = round1(implied);
-        let w = learned != null ? Math.min(0.6, v.games >= 2 ? learned : learned * 1.5) : v.games >= 4 ? 0.35 : v.games >= 2 ? 0.4 : 0.55;
+        // Consensus first: research on rest-of-season prediction finds the crowd (betting markets,
+        // expert consensus) beats any one model, so the experts carry about half the value by default.
+        let w = learned != null ? Math.min(0.75, v.games >= 2 ? learned : learned * 1.5) : v.games >= 4 ? 0.5 : v.games >= 2 ? 0.55 : 0.65;
         // Injured with no games of his own: the market already set his value above, so split evenly with the experts.
         if (this.noOwnData(v)) w = v.market ? 0.5 : 1;
         v.valuePg = round1(Math.max(0, (1 - w) * v.valuePg + w * implied));
@@ -2383,6 +2415,41 @@ export function parseInjuryNote(text: string) {
   for (const d of out.days) byDay.set(d.day, d.st);
   out.days = [...byDay.entries()].map(([day, st]) => ({ day, st }));
   return out;
+}
+
+type ProjSource = "sleeper" | "espn" | "fantasypros";
+
+/**
+ * Weighted average of the projection sources that have a number for this player. Zeros are left
+ * out (a source that hasn't caught up on a role change or a ruling); chance to play handles outs.
+ * Weights: calibrate.py's when it has learned all three, otherwise its two-source weights shrunk
+ * halfway toward an equal three-way split.
+ */
+export function blendProjections(
+  vals: [ProjSource, number | null][],
+  pb: { sleeper: number; espn: number; fantasypros?: number } | null
+): number | null {
+  const eq = 1 / 3;
+  let w: Record<ProjSource, number>;
+  if (pb && pb.fantasypros != null) w = { sleeper: pb.sleeper, espn: pb.espn, fantasypros: pb.fantasypros };
+  else if (pb && pb.sleeper + pb.espn > 0) {
+    const t = pb.sleeper + pb.espn;
+    w = {
+      sleeper: 0.5 * eq + 0.5 * ((pb.sleeper / t) * (2 / 3)),
+      espn: 0.5 * eq + 0.5 * ((pb.espn / t) * (2 / 3)),
+      fantasypros: eq,
+    };
+  } else w = { sleeper: eq, espn: eq, fantasypros: eq };
+  let num = 0;
+  let den = 0;
+  for (const [k, v] of vals) {
+    if (v == null || !(v > 0) || !(w[k] > 0)) continue;
+    num += w[k] * v;
+    den += w[k];
+  }
+  if (den > 0) return num / den;
+  const any = vals.find(([, v]) => v != null);
+  return any ? any[1] : null;
 }
 
 function normName(n: string) {

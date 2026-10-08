@@ -2,12 +2,13 @@
 
 Every time a new NFL week finishes, the nightly GitHub Action replays last season and
 this season week by week. For every player-week it asks: given what we knew beforehand
-(Sleeper and ESPN projections, season average, last 3 games, expected points from usage),
+(Sleeper, ESPN and FantasyPros consensus projections, season average, last 3 games, expected
+points from usage),
 what did he actually score? It then fits the blend that predicts best, measures how
 wrong each source is, and learns how often players at each position miss games.
 
 The app reads the result from data/nfl.json, so the model gets sharper as the season goes.
-Everything here is free: nflverse, ffopportunity, Sleeper and ESPN projections.
+Everything here is free: nflverse, ffopportunity, Sleeper, ESPN and FantasyPros projections.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ import pandas as pd
 NFLVERSE = "https://github.com/nflverse/nflverse-data/releases/download"
 FFOPP = "https://github.com/ffverse/ffopportunity/releases/download/latest-data"
 POS = ["QB", "RB", "WR", "TE"]
-VERSION = 4
+VERSION = 5
 
 # ESPN stat id -> (Sleeper-style key) for PPR scoring of ESPN projections.
 ESPN_STAT = {"3": "pass_yd", "4": "pass_td", "20": "pass_int", "24": "rush_yd", "25": "rush_td",
@@ -81,6 +82,26 @@ def espn_proj(season: int, week: int, espn_to_gsis: dict) -> dict:
                     out[g] = ppr(line)
                 break
     return out
+
+
+def fp_proj(season: int, week: int, fp_to_gsis: dict, name_to_gsis: dict) -> dict:
+    """FantasyPros consensus projections for a past week (their pages keep old weeks), in PPR points."""
+    import fantasypros as fp  # lives next to this file
+
+    out = {}
+    for pos, rows in fp.projections(week, year=season, pause=0.5).items():
+        for r in rows:
+            g = fp_to_gsis.get(r["fpid"] or "") or name_to_gsis.get((norm(r["name"]), pos))
+            if g:
+                out[g] = ppr(r["s"])
+    return out
+
+
+def norm(n) -> str:
+    import re
+
+    s = re.sub(r"\b(jr|sr|ii|iii|iv|v)\b", "", str(n).lower())
+    return re.sub(r"[^a-z]", "", s)
 
 
 def nnls(X: np.ndarray, y: np.ndarray, iters: int = 400) -> np.ndarray:
@@ -158,7 +179,9 @@ def build_rows(season: int, max_week: int, ids: pd.DataFrame, fetch_proj: bool, 
 
     sl_map = {str(int(float(s))): g for s, g in zip(ids.sleeper_id, ids.gsis_id) if isinstance(g, str) and not pd.isna(s)}
     es_map = {str(int(float(s))): g for s, g in zip(ids.espn_id, ids.gsis_id) if isinstance(g, str) and not pd.isna(s)}
-    proj_s, proj_e = {}, {}
+    fp_map = {str(int(float(f))): g for f, g in zip(ids.fantasypros_id, ids.gsis_id) if isinstance(g, str) and not pd.isna(f)}
+    nm_map = {(norm(n), p): g for n, p, g in zip(ids.name, ids.position, ids.gsis_id) if isinstance(g, str) and isinstance(n, str)}
+    proj_s, proj_e, proj_f = {}, {}, {}
     if fetch_proj:
         for w in range(1, max_week + 1):
             try:
@@ -169,6 +192,10 @@ def build_rows(season: int, max_week: int, ids: pd.DataFrame, fetch_proj: bool, 
                 proj_e[w] = espn_proj(season, w, es_map)
             except Exception as e:  # noqa: BLE001
                 log(f"  calib: ESPN projections {season} wk{w} unavailable ({e.__class__.__name__})")
+            try:
+                proj_f[w] = fp_proj(season, w, fp_map, nm_map)
+            except Exception as e:  # noqa: BLE001
+                log(f"  calib: FantasyPros projections {season} wk{w} unavailable ({e.__class__.__name__})")
 
     rows = []
     for pid, g in stats.sort_values("week").groupby("player_id"):
@@ -188,6 +215,7 @@ def build_rows(season: int, max_week: int, ids: pd.DataFrame, fetch_proj: bool, 
                     "ppg": float(np.mean(hist_fp)), "last3": float(np.mean(hist_fp[-3:])),
                     "xfp": float(np.mean(hist_xfp)) if hist_xfp else np.nan,
                     "projS": proj_s.get(w, {}).get(pid, np.nan), "projE": proj_e.get(w, {}).get(pid, np.nan),
+                    "projF": proj_f.get(w, {}).get(pid, np.nan),
                 })
             hist_fp.append(fp)
             if (pid, w) in xfp:
@@ -423,17 +451,30 @@ def calibrate(season: int, max_week: int, ids: pd.DataFrame, games: pd.DataFrame
     out = {"version": VERSION, "season": season, "throughWeek": max_week, "n": int(len(data)),
            "weights": {}, "projBlend": None, "sd": {}, "avail": availability([season - 1, season], games), "accuracy": {}}
 
-    # 1) How to combine the two projection sources.
-    both = data.dropna(subset=["projS", "projE"])
-    if len(both) >= 500:
-        w = nnls(both[["projS", "projE"]].to_numpy(), both.y.to_numpy())
+    # 1) How to combine the projection sources. Fit on rows where every source has a number, then
+    # pull halfway back toward equal weights: studies of many seasons find which source is best
+    # doesn't hold from year to year, and a plain average is the safest bet.
+    src = [("sleeper", "projS"), ("espn", "projE"), ("fantasypros", "projF")]
+    have = [(k, c) for k, c in src if data[c].notna().sum() >= 500]
+    both = data.dropna(subset=[c for _, c in have]) if have else data.iloc[0:0]
+    if len(have) >= 2 and len(both) >= 500:
+        w = nnls(both[[c for _, c in have]].to_numpy(), both.y.to_numpy())
         if w.sum() > 0:
-            out["projBlend"] = {"sleeper": round(float(w[0] / w.sum()), 3), "espn": round(float(w[1] / w.sum()), 3)}
-    pb = out["projBlend"] or {"sleeper": 0.5, "espn": 0.5}
-    data["proj"] = np.where(
-        data.projS.notna() & data.projE.notna(), pb["sleeper"] * data.projS + pb["espn"] * data.projE,
-        data.projS.fillna(data.projE),
-    )
+            w = w / w.sum()
+            eq = 1.0 / len(have)
+            out["projBlendRaw"] = {k: round(float(x), 3) for (k, _), x in zip(have, w)}
+            out["projBlend"] = {k: round(float(0.5 * x + 0.5 * eq), 3) for (k, _), x in zip(have, w)}
+    pb = out["projBlend"] or {k: 1.0 / len(src) for k, _ in src}
+    num_ = np.zeros(len(data))
+    den_ = np.zeros(len(data))
+    for k, c in src:
+        wk = pb.get(k, 0.0)
+        v = data[c].to_numpy(dtype=float)
+        ok = ~np.isnan(v) & (v > 0)
+        num_ += np.where(ok, wk * np.nan_to_num(v), 0.0)
+        den_ += np.where(ok, wk, 0.0)
+    fallback = data.projS.fillna(data.projE).fillna(data.projF)
+    data["proj"] = np.where(den_ > 0, num_ / np.where(den_ > 0, den_, 1), fallback)
 
     # 2) Per-position blend of projection, recent form, season average and expected points.
     feats = ["proj", "last3", "ppg", "xfp"]
@@ -498,8 +539,11 @@ def calibrate(season: int, max_week: int, ids: pd.DataFrame, games: pd.DataFrame
                     continue
                 w = nnls(tr[feats].to_numpy(), tr.y.to_numpy())
                 mae.setdefault("warRoom", []).extend(np.abs(te.y - te[feats].to_numpy() @ w).tolist())
+                mae.setdefault("blend", []).extend(np.abs(te.y - te.proj).tolist())
                 mae.setdefault("sleeper", []).extend(np.abs(te.y - te.projS.fillna(te.proj)).tolist())
                 mae.setdefault("espn", []).extend(np.abs(te.y - te.projE.fillna(te.proj)).tolist())
+                if te.projF.notna().mean() > 0.5:
+                    mae.setdefault("fantasypros", []).extend(np.abs(te.y - te.projF.fillna(te.proj)).tolist())
             out["accuracy"] = {k: round(float(np.mean(v)), 2) for k, v in mae.items()}
             out["accuracy"]["n"] = int(len(test))
     log(f"  calib: weights {out['weights']}, noProj {out['weightsNoProj']}, blend {out['projBlend']}, matchup {out['matchup']}, "
