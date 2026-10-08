@@ -191,23 +191,11 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
             }
             sub={
               model.gameFor(v.p.team, model.week) ? (
-                <span title="War Room's projection: Sleeper, ESPN and FantasyPros blended with usage, matchup, Vegas and chance to play">
+                <span>
                   Wk {model.week} proj {model.projection(v.p.id).toFixed(1)}
-                  {(() => {
-                    // Only the sources that actually have a number for him this week.
-                    const inputs = (
-                      [
-                        ["Sleeper", v.projSleeper],
-                        ["ESPN", v.projEspn],
-                        [v.projFpRank != null ? `FantasyPros (${v.p.pos}${Math.round(v.projFpRank)} rank)` : "FantasyPros", v.projFp],
-                      ] as [string, number | null][]
-                    ).filter(([, x]) => x != null && x > 0);
-                    return inputs.length ? (
-                      <span className="block text-[10px] text-slate-500">
-                        From {inputs.map(([k, x]) => `${k} ${x!.toFixed(1)}`).join(" · ")}
-                      </span>
-                    ) : null;
-                  })()}
+                  {v.projSleeper != null && (
+                    <span className="block text-[10px] text-slate-500">Sleeper {v.projSleeper.toFixed(1)}</span>
+                  )}
                 </span>
               ) : (
                 `Bye in week ${model.week}`

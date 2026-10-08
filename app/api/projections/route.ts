@@ -13,7 +13,7 @@ export async function GET(req: Request) {
     .filter((w) => w >= 1 && w <= 18);
   if (!season || !weeks.length) return fail(new Error("season and weeks are required"), 400);
   try {
-    return ok(await Promise.all(weeks.map((w) => getWeekProjections(season, w))), 3600);
+    return ok(await Promise.all(weeks.map((w) => getWeekProjections(season, w))), 1800);
   } catch (e) {
     return fail(e);
   }

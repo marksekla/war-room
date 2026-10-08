@@ -143,7 +143,8 @@ export function getWeekStats(season: number, week: number, final: boolean): Prom
 }
 
 export function getWeekProjections(season: number, week: number): Promise<WeekProjections> {
-  return cached(`proj:${season}:${week}`, 2 * HOUR, async () => {
+  // 30 minutes so the Sleeper number on the player card tracks the Sleeper app closely.
+  return cached(`proj:${season}:${week}`, 30 * MIN, async () => {
     const rows = await getJson<RawStatRow[]>(
       `${SLEEPER_STATS}/projections/nfl/${season}/${week}?season_type=regular&${POS_QUERY}`
     );
