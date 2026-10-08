@@ -2359,6 +2359,8 @@ export class LeagueModel {
       .filter((d) => (this.contingentValue(d.p.id, myId)?.pts ?? 0) < 2) // keep real handcuff stashes
       .slice(0, 3);
     let best: { v: PlayerView; drop: PlayerView; plan: ReturnType<LeagueModel["waiverPlan"]> } | null = null;
+    // Small but real upgrades: a better player at the same spot, even if he only starts now and then.
+    let minor: { v: PlayerView; drop: PlayerView; plan: ReturnType<LeagueModel["waiverPlan"]> } | null = null;
     for (const v of this.freeAgents("ALL").filter((x) => !["K", "DEF"].includes(x.p.pos)).slice(0, 25))
       for (const drop of drops) {
         // Never cut someone the trade market or the experts rate clearly above the pickup.
@@ -2367,8 +2369,12 @@ export class LeagueModel {
         if (drop.ecrRos != null && drop.p.pos === v.p.pos && (v.ecrRos == null || drop.ecrRos < v.ecrRos * 0.85)) continue;
         const plan = this.waiverPlan(myId, v.p.id, drop.p.id);
         if (!best || plan.gain > best.plan.gain) best = { v, drop, plan };
+        const better = v.p.pos === drop.p.pos && v.valuePg >= drop.valuePg + 1;
+        if ((plan.gain >= 1 || (better && plan.gain >= 0)) && plan.starts >= 1 && (!minor || plan.gain + (better ? 1 : 0) > minor.plan.gain + (minor.v.p.pos === minor.drop.p.pos ? 1 : 0)))
+          minor = { v, drop, plan };
       }
-    if (best && best.plan.gain >= 3 && best.plan.starts >= 2)
+    const bigMove = !!best && best.plan.gain >= 3 && best.plan.starts >= 2;
+    if (best && bigMove)
       items.push({
         kind: "waiver",
         text: `Add ${best.v.p.name}, drop ${best.drop.p.name}: he'd start about ${best.plan.starts} of your ${best.plan.weeks} remaining weeks (+${best.plan.gain.toFixed(0)} pts in lineups you'd actually play).`,
@@ -2440,7 +2446,19 @@ export class LeagueModel {
       if (back != null && v?.p.injury && LONG_TERM.has(v.p.injury) && back <= this.week + 2)
         items.push({ kind: "return", text: `${v.p.name} is expected back week ${back}. Keep a roster spot ready.`, playerId: id, tone: "lime" });
     }
-    return items.slice(0, 7);
+    // 8) Minor upgrade, last so it never pushes out anything urgent.
+    const out = items.slice(0, 7);
+    if (!bigMove && minor) {
+      const pg = minor.v.valuePg - minor.drop.valuePg;
+      out.push({
+        kind: "waiver",
+        text: `Minor upgrade: add ${minor.v.p.name}, drop ${minor.drop.p.name} (${pg >= 0.5 ? `+${pg.toFixed(1)} pts/game when he plays, ` : ""}+${Math.max(0, minor.plan.gain).toFixed(0)} pts in your lineups the rest of the way).`,
+        tab: "waivers",
+        playerId: minor.v.p.id,
+        tone: "cyan",
+      });
+    }
+    return out;
   }
 
   // ---------- start / sit ----------
