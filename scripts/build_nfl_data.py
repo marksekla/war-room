@@ -340,7 +340,7 @@ def consensus_projections(ids: pd.DataFrame, week: int | None) -> dict | None:
 DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
-def practice_log(inj: pd.DataFrame, prev: dict | None, upcoming_week: int | None) -> dict:
+def practice_log(inj: pd.DataFrame, prev: dict | None, upcoming_week: int | None, labels: dict | None = None) -> dict:
     """Day-by-day practice participation for the current week. nflverse keeps only the latest
     status per week, so each build records what it sees under today's date (ET) and keeps
     earlier days from the previous build."""
@@ -367,11 +367,68 @@ def practice_log(inj: pd.DataFrame, prev: dict | None, upcoming_week: int | None
         if not st or not isinstance(r.gsis_id, str):
             continue
         days = dict(out["p"].get(r.gsis_id, {}))
-        # Only record changes: the source can lag a day, so a repeat isn't proof he practiced again.
-        if not days or list(days.values())[-1] != st:
+        lab = (labels or {}).get(r.gsis_id)
+        if lab:
+            # On the official report: we know which day it describes (see official_days).
+            d, new = lab
+            if new or d not in days:
+                days[d] = st
+        # Otherwise only record changes: the source can lag a day, so a repeat isn't proof he practiced again.
+        elif not days or list(days.values())[-1] != st:
             days[day] = st
         out["p"][r.gsis_id] = days
     return out
+
+
+def kickoff_et(games: pd.DataFrame, season: int, week: int, tm: str):
+    g = games[(games.season == season) & (games.week == week)]
+    for r in g.itertuples(index=False):
+        if tm in (team(r.home_team), team(r.away_team)):
+            try:
+                hh, mm = str(r.gametime or "13:00").split(":")[:2]
+                return datetime.fromisoformat(str(r.gameday)).replace(hour=int(hh), minute=int(mm), tzinfo=ZoneInfo("America/New_York"))
+            except (ValueError, TypeError):
+                return None
+    return None
+
+
+def official_days(rows: list[dict], games: pd.DataFrame, season: int, week: int, prev: dict | None):
+    """Label each team's official report with the practice day it describes.
+
+    A team's report only gets a new day when its contents change from the last build. The first time
+    we see a team, it's labeled with the latest day whose report should be out (4:30pm local). An
+    unchanged report keeps its label, so a team that hasn't posted yet can't have yesterday's report
+    filed under today."""
+    now = datetime.now(ZoneInfo("America/New_York"))
+    prev_t = (prev or {}).get("t", {}) if (prev or {}).get("w") == week else {}
+    tables: dict[int, list[dict]] = {}
+    for r in rows:
+        tables.setdefault(r["tbl"], []).append(r)
+    out: dict[str, dict] = {}
+    labels: dict[str, tuple[str, bool]] = {}
+    for tbl_rows in tables.values():
+        tm = next((r["team"] for r in tbl_rows if r["team"]), None)
+        kick = kickoff_et(games, season, week, tm) if tm else None
+        if not tm or kick is None:
+            continue
+        fp_ = nfl_official.fingerprint(tbl_rows)
+        old = prev_t.get(tm)
+        if old and old.get("fp") == fp_:
+            day, new = old.get("day"), False
+            # Teams file every practice day. Hours past the deadline with nothing changed means the new
+            # day's report came out identical (everyone practiced the same as the day before).
+            late = nfl_official.report_day(kick, now, tm, "late")
+            if late and day in nfl_official.DAYS and nfl_official.DAYS.index(late) > nfl_official.DAYS.index(day):
+                day, new = late, True
+        else:
+            day, new = nfl_official.report_day(kick, now, tm, "noon" if old else "posted"), True
+        if not day:
+            continue
+        out[tm] = {"fp": fp_, "day": day}
+        for r in tbl_rows:
+            if r.get("gsis"):
+                labels[r["gsis"]] = (day, new)
+    return {"w": week, "t": out}, labels
 
 
 def merge_official(inj: pd.DataFrame, rows: list[dict], season: int, week: int) -> pd.DataFrame:
@@ -422,10 +479,12 @@ def main() -> None:
     ids = read(IDS)
     # The official injury report straight from nfl.com, laid over nflverse's slower copy.
     official = None
+    off_rows: list[dict] = []
     wk_up = upcoming_week(games, season) if not games.empty else None
     if wk_up:
         try:
             rows, diag = nfl_official.report(season, wk_up, ids)
+            off_rows = rows
         except Exception as e:  # noqa: BLE001 - a bonus source, never block the build
             rows, diag = [], {"error": f"{e.__class__.__name__}: {e}"}
         official = {"w": wk_up, "n": len(rows), "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ")}
@@ -804,7 +863,17 @@ def main() -> None:
     bad = {k: v for k, v in fp.DIAG.items() if "error" in v or v.get("passRate", 1) < 0.7}
     data["fpDiag"] = bad or None
     data["espnProj"] = espn_projections(season, nxt)
-    data["pracLog"] = practice_log(inj, old_prac, nxt)
+    old_days = None
+    if os.path.exists(OUT):
+        try:
+            with open(OUT) as fh:
+                old_days = json.load(fh).get("officialDays")
+        except (OSError, ValueError):
+            old_days = None
+    labels = None
+    if off_rows and wk_up:
+        data["officialDays"], labels = official_days(off_rows, games, season, wk_up, old_days)
+    data["pracLog"] = practice_log(inj, old_prac, nxt, labels)
     data["officialReport"] = official
     try:
         data["calib"] = (

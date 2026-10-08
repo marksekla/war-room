@@ -227,6 +227,8 @@ export interface NflData {
   fpProj?: { week: number; date: string; lines: Record<string, Record<string, number>> } | null;
   /** Backup copy of ESPN's projections for one week (keyed by ESPN id), used when the live ESPN request fails. */
   espnProj?: { week: number; lines: Record<string, Record<string, number>> } | null;
+  /** Which practice day each team's official report described at the last data build (by report fingerprint). */
+  officialDays?: { w: number; t: Record<string, { fp: string; day: string }> } | null;
   /** The official nfl.com injury report as of the last data build (players listed, when read). */
   officialReport?: { w: number; n: number; at: string; matched?: number; teams?: number; diag?: unknown } | null;
   /** Notes on FantasyPros pages that couldn't be read on the last data build. */

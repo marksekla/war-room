@@ -30,6 +30,7 @@ const text = (html: string) =>
     .replace(/&amp;/g, "&")
     .replace(/&#0?39;|&apos;|&#x27;/g, "'")
     .replace(/&quot;/g, '"')
+    .replace(/&#?[a-z0-9]+;/gi, "")
     .replace(/\s+/g, " ")
     .trim();
 
@@ -91,16 +92,46 @@ function etParts(t: number) {
  * practice day whose report should be out by now (about 4:30pm local). Practice days are the three days
  * ending two days before a Sunday/Monday/Saturday game, or the three days before a Thursday game.
  */
-export function officialReportDay(team: string, kick: number, now: number): string | null {
+export function officialReportDay(team: string, kick: number, now: number, rule: "posted" | "noon" | "late" = "posted"): string | null {
   const k = etParts(kick);
   const offsets = k.wd === "Thu" ? [3, 2, 1] : [4, 3, 2];
+  const [hh, mm] = rule === "posted" ? [16, 30] : rule === "late" ? [19, 0] : [12, 0];
   let label: string | null = null;
   for (const daysBack of offsets) {
     const t = kick - daysBack * 86_400_000;
     const e = etParts(t);
     const utcOff = (new Date(t).getUTCHours() - e.h + 24) % 24; // 4 in summer, 5 in winter
-    const posted = Date.UTC(e.y, e.m - 1, e.d, 16 + (TZ[team] ?? 0) + utcOff, 30);
-    if (now >= posted) label = e.wd;
+    const at = Date.UTC(e.y, e.m - 1, e.d, hh + (TZ[team] ?? 0) + utcOff, mm);
+    if (now >= at) label = e.wd;
   }
   return label;
+}
+
+const normName = (n: string) => n.toLowerCase().replace(/\b(jr|sr|ii|iii|iv|v)\b/g, "").replace(/[^a-z]/g, "");
+
+/** Same hash the data build stores (scripts/nfl_official.py fingerprint), so a report can be recognised. */
+export function reportFingerprint(rows: OfficialRow[]): string {
+  const items = rows.map((r) => `${normName(r.name)}|${r.practice ?? ""}|${r.game ?? ""}`).sort();
+  let h = 0x811c9dc5;
+  for (const b of new TextEncoder().encode(items.join(";"))) {
+    h ^= b;
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
+
+const ORDER = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+/**
+ * The practice day a team's live report describes. If the data build already saw this exact report,
+ * keep its label (unless it's now well past the next day's deadline, which means the new day's report
+ * came out identical). If the report changed since, it's the latest practice day that has started. A
+ * team the build never saw gets the latest day whose report should be out.
+ */
+export function labelReport(team: string, fp: string, kick: number, now: number, saved?: { fp: string; day: string } | null): string | null {
+  if (saved && saved.fp === fp) {
+    const late = officialReportDay(team, kick, now, "late");
+    return late && ORDER.indexOf(late) > ORDER.indexOf(saved.day) ? late : saved.day;
+  }
+  return officialReportDay(team, kick, now, saved ? "noon" : "posted");
 }

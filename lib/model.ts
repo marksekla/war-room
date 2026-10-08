@@ -4,7 +4,7 @@
 // week by week so trades and waiver moves are judged on how many points your
 // actual starting lineup gains, not on raw rankings.
 
-import { officialReportDay, type OfficialRow } from "./officialReport";
+import { labelReport, reportFingerprint, type OfficialRow } from "./officialReport";
 import type {
   EspnInjury,
   PlayCalib,
@@ -90,6 +90,8 @@ export interface Extras {
   /** The NFL's official injury report for the current week, read live from nfl.com. */
   official?: OfficialReport | null;
 }
+
+type OfficialEntry = OfficialRow & { team: string | null; fp: string };
 
 export interface OfficialReport {
   season: number;
@@ -809,13 +811,13 @@ export class LeagueModel {
     return res;
   }
 
-  private officialMap: Map<string, OfficialRow> | null = null;
+  private officialMap: Map<string, OfficialEntry> | null = null;
   /** This player's line on the official injury report, matched by name and team. */
-  officialFor(id: string): OfficialRow | null {
+  officialFor(id: string): OfficialEntry | null {
     const rep = this.extras.official;
     if (!rep || rep.week !== this.week || !rep.rows?.length) return null;
     if (!this.officialMap) {
-      const m = new Map<string, OfficialRow>();
+      const m = new Map<string, OfficialEntry>();
       const byName = new Map<string, Player[]>();
       for (const p of Object.values(this.players)) {
         if (!p.team || p.pos === "DEF") continue;
@@ -837,10 +839,13 @@ export class LeagueModel {
         const total = [...t.values()].reduce((a, b) => a + b, 0);
         tblTeam.set(tbl, n >= 2 && n / total >= 0.6 ? top : null);
       }
+      const byTbl = new Map<number, OfficialRow[]>();
+      for (const r of rep.rows) byTbl.set(r.tbl, [...(byTbl.get(r.tbl) ?? []), r]);
+      const fps = new Map([...byTbl.entries()].map(([t, rows]) => [t, reportFingerprint(rows)]));
       for (const r of rep.rows) {
         const team = tblTeam.get(r.tbl) ?? r.contextTeam;
         const c = (byName.get(normName(r.name)) ?? []).filter((p) => !team || p.team === team);
-        if (c.length === 1) m.set(c[0].id, r);
+        if (c.length === 1) m.set(c[0].id, { ...r, team: team ?? c[0].team ?? null, fp: fps.get(r.tbl)! });
       }
       this.officialMap = m;
     }
@@ -896,8 +901,9 @@ export class LeagueModel {
     // The official report, read live: its latest practice status belongs to the most recent practice
     // day whose report should be out by now.
     const off = this.officialFor(v.p.id);
-    if (off?.practice) {
-      const d = officialReportDay(v.p.team, kick, now);
+    if (off?.practice && off.team) {
+      const saved = this.nfl?.officialDays?.w === this.week ? this.nfl.officialDays.t[off.team] : null;
+      const d = labelReport(off.team, off.fp, kick, now, saved);
       if (d) days.set(d, off.practice);
       else if (!days.size) days.set("Latest", off.practice);
     }

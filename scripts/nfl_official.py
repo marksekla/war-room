@@ -184,3 +184,41 @@ def report(season: int, week: int, ids) -> tuple[list[dict], dict]:
     diag["byTeam"] = by
     diag["unmatchedSkill"] = [r["name"] for r in rows if not r["gsis"] and r["pos"] in ("QB", "RB", "WR", "TE", "K")][:15]
     return rows, diag
+
+
+# ---------- which practice day a report describes ----------
+
+SHORT = {"Did Not Participate In Practice": "DNP", "Limited Participation in Practice": "LP",
+         "Full Participation in Practice": "FP"}
+# Hours behind Eastern (teams post the report in the afternoon, local time).
+TZ = {"CHI": 1, "DAL": 1, "GB": 1, "HOU": 1, "KC": 1, "MIN": 1, "NO": 1, "TEN": 1,
+      "DEN": 2, "ARI": 2, "LAC": 3, "LAR": 3, "LV": 3, "SEA": 3, "SF": 3}
+DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def fingerprint(rows: list[dict]) -> str:
+    """Short hash of one team's report (names, practice, game status). The app computes the same one,
+    so it can tell whether the live page still shows the report this build already labeled."""
+    items = sorted(f"{_norm(r['name'])}|{SHORT.get(r['practice'] or '', '')}|{r['game'] or ''}" for r in rows)
+    h = 0x811C9DC5
+    for b in ";".join(items).encode("utf-8"):
+        h ^= b
+        h = (h * 0x01000193) & 0xFFFFFFFF
+    return format(h, "08x")
+
+
+def report_day(kick_et, now_et, team: str, rule: str) -> str | None:
+    """Most recent practice day this team's report can describe by now. rule "posted": that day's report
+    should be out (4:30pm local). rule "late": it's surely out (7pm local). rule "noon": the report has visibly changed, so it's the latest practice
+    day that has started (noon local). Practice days: the 3 days ending 2 days before a Sun/Mon/Sat game,
+    or the 3 days before a Thursday game."""
+    from datetime import timedelta
+
+    offsets = [3, 2, 1] if kick_et.weekday() == 3 else [4, 3, 2]
+    hour, minute = {"posted": (16, 30), "late": (19, 0)}.get(rule, (12, 0))
+    label = None
+    for back in offsets:
+        d = (kick_et - timedelta(days=back)).replace(hour=hour + TZ.get(team, 0), minute=minute, second=0, microsecond=0)
+        if now_et >= d:
+            label = DAYS[d.weekday()]
+    return label
