@@ -91,7 +91,7 @@ export function playerSummary(m: LeagueModel, v: PlayerView, detail = false) {
         }
       : "No nflverse data for this player yet.",
     espnInjury: v.espn ? { status: v.espn.status, updated: v.espn.date, comment: v.espn.short, returnDate: v.espn.returnDate } : null,
-    projectionSources: { sleeper: v.projSleeper, espn: v.projEspn, fantasyProsConsensus: v.projFp, rawBlend: v.projNext, warRoom: m.projection(v.p.id), note: "warRoom is the projection to quote; it adds usage, matchup, Vegas and chance to play" },
+    projectionSources: { sleeper: v.projSleeper, espn: v.projEspn, fantasyProsConsensus: v.projFp, fantasyProsFromWeeklyRank: v.projFpRank, rawBlend: v.projNext, warRoom: m.projection(v.p.id), note: "warRoom is the projection to quote; it adds usage, matchup, Vegas and chance to play" },
     thisWeekContext: weekContext(m, v, m.week),
     teamEnvironment: teamEnvSummary(m, v.p.team),
     note: "oppRankVsPos: 1 = stingiest defense vs this position, 32 = most generous (league scoring, this season).",

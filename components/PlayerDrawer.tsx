@@ -199,7 +199,7 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
                       [
                         ["Sleeper", v.projSleeper],
                         ["ESPN", v.projEspn],
-                        ["FantasyPros", v.projFp],
+                        [v.projFpRank != null ? `FantasyPros (${v.p.pos}${Math.round(v.projFpRank)} rank)` : "FantasyPros", v.projFp],
                       ] as [string, number | null][]
                     ).filter(([, x]) => x != null && x > 0);
                     return inputs.length ? (

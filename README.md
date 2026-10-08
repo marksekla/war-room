@@ -11,7 +11,7 @@ Sync any Sleeper league and get:
 - **Player search** – find anyone from the header and open his card.
 - **Are they playing?** – every fantasy-relevant player on the injury report with his chance to suit up, injury, matchup and day-by-day practice report. The chance comes from a model trained on recent seasons' official injury reports (designation, last practice, missed last game, injury type, position) and updates with this week's practice reports and ESPN injury notes.
 - **Expert consensus** – FantasyPros rest-of-season and weekly consensus rankings, read fresh from fantasypros.com (DynastyProcess mirror as backup), feed player values, team needs, the trade check and start/sit. Rest-of-season values lean on the consensus: by default it carries about half of each player's value.
-- **Three projection sources** – Sleeper, ESPN and FantasyPros consensus projections are averaged. Independent multi-season studies find an average of sources beats nearly every single source, and that the "best" source changes year to year, so learned weights are pulled halfway toward an even split.
+- **Three projection sources** – Sleeper, ESPN and FantasyPros consensus are averaged. FantasyPros' free pages list only the top 10 projections at each position, so everyone else gets FantasyPros' number from its weekly expert consensus rank (rank N is worth what the Nth-best projection at that position is worth this week). Independent multi-season studies find an average of sources beats nearly every single source, and that the "best" source changes year to year, so learned weights are pulled halfway toward an even split.
 - **Playoff odds** – simulates the rest of the season thousands of times on your league's real schedule, then the bracket: every team's chance to make the playoffs, get a bye and win the title. The trade simulator shows how a deal moves your odds.
 - **Saved AI chats** – conversations stay after a refresh (stored in your browser only).
 - **Command dashboard** – this week's head-to-head with win odds, a live league wire of every add, drop and trade, your roster with usage (snap %, target share, carry share), next matchup, value over replacement, rest-of-season points, a week-by-week outlook to the championship, standings, and every team's needs.
@@ -109,7 +109,7 @@ It also tests itself honestly (trained on last season, scored on this season's g
 | Transactions and trade history (this and last season) | Sleeper API | 5 min |
 | Weekly stats, projections, trending adds | Sleeper (public, undocumented endpoints) | 10 min to 2 h |
 | Second projection source | ESPN fantasy (public, undocumented) | 2 h |
-| Third projection source: consensus of many sites | FantasyPros projections pages | twice daily |
+| Third projection source: consensus of many sites | FantasyPros projections (top 10 per position) + weekly expert ranks | twice daily |
 | Injury designations | ESPN injuries feed + Sleeper | 15 min |
 | Player news | ESPN fantasy news (Rotowire blurbs) | 20 min |
 | Schedule, kickoff, spreads, totals | ESPN scoreboard | 30 min |

@@ -246,7 +246,13 @@ export default function Settings({ onClose }: { onClose: () => void }) {
 function projStatus(m: NonNullable<ReturnType<typeof useLeague>["model"]>) {
   const live = m.extras.espnProj && Object.keys(m.extras.espnProj).length > 0;
   const espn = live ? "ESPN live" : m.nfl?.espnProj?.week === m.week ? "ESPN from the backup copy" : "ESPN not loaded";
-  const fp = m.nfl?.fpProj?.week === m.week ? `FantasyPros week ${m.week}, ${m.nfl.fpProj.date}` : "FantasyPros not loaded yet";
+  const ranks = m.nfl?.ecr && (m.nfl.ecr.week == null || m.nfl.ecr.week === m.week);
+  const fp =
+    m.nfl?.fpProj?.week === m.week
+      ? `FantasyPros top-10 projections + weekly ranks for everyone else (${m.nfl.fpProj.date})`
+      : ranks
+        ? `FantasyPros weekly ranks (${m.nfl!.ecr!.date})`
+        : "FantasyPros not loaded yet";
   return `Sleeper live · ${espn} · ${fp}`;
 }
 

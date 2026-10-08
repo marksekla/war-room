@@ -24,6 +24,9 @@ NFLVERSE = "https://github.com/nflverse/nflverse-data/releases/download"
 FFOPP = "https://github.com/ffverse/ffopportunity/releases/download/latest-data"
 POS = ["QB", "RB", "WR", "TE"]
 VERSION = 6
+# FantasyPros' free pages only list each position's top 10, too few to learn a weight from, so the
+# app gives FantasyPros an even share instead. Flip on if a full feed becomes available.
+FP_HISTORY = False
 
 # ESPN stat id -> (Sleeper-style key) for PPR scoring of ESPN projections.
 ESPN_STAT = {"3": "pass_yd", "4": "pass_td", "20": "pass_int", "24": "rush_yd", "25": "rush_td",
@@ -192,6 +195,8 @@ def build_rows(season: int, max_week: int, ids: pd.DataFrame, fetch_proj: bool, 
                 proj_e[w] = espn_proj(season, w, es_map)
             except Exception as e:  # noqa: BLE001
                 log(f"  calib: ESPN projections {season} wk{w} unavailable ({e.__class__.__name__})")
+            if not FP_HISTORY:
+                continue
             try:
                 proj_f[w] = fp_proj(season, w, fp_map, nm_map)
             except Exception as e:  # noqa: BLE001

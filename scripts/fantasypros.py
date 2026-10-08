@@ -3,7 +3,8 @@
 Two things come from here:
   * Consensus weekly projections (stat lines averaged across many sites). Independent studies
     find an average of many projection sources beats almost every single source, so this is
-    War Room's third projection input next to Sleeper and ESPN.
+    War Room's third projection input next to Sleeper and ESPN. The free pages only list the top
+    10 at each position; the app fills in everyone else from the weekly consensus rankings.
   * Expert consensus rankings (ECR), rest of season and this week. Pulled fresh from the
     rankings pages; the DynastyProcess mirror (updated about once a week) is the fallback.
 
@@ -242,7 +243,7 @@ def parse_projections(html: str, pos: str) -> list[dict]:
         for align in ("head", "tail"):
             got = _rows_with(body, ks, align)
             rate = _pass_rate(got, pos)
-            if len(got) >= 20 and rate > best_rate:
+            if len(got) >= 8 and rate > best_rate:  # the free pages list the top 10
                 best, best_rate = got, rate
     diag["passRate"] = round(best_rate, 2)
     DIAG[pos] = diag

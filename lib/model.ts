@@ -66,6 +66,8 @@ export interface PlayerView {
   projEspn: number | null;
   /** FantasyPros consensus projection (an average of many sites), league scoring. */
   projFp: number | null;
+  /** When FantasyPros has no projection for him, the weekly expert rank his FantasyPros number came from. */
+  projFpRank: number | null;
   /** FantasyPros expert consensus: rest-of-season positional rank (and spread), this week's rank. */
   ecrRos: number | null;
   ecrSd: number | null;
@@ -441,6 +443,35 @@ export class LeagueModel {
     }
     const projByWeek = new Map(this.projections.map((p) => [p.week, p]));
     const trend = new Map(this.trending.add.map((t) => [t.player_id, t.count]));
+    const pb = this.extras.nfl?.calib?.projBlend ?? null;
+    const espnBackup = this.nfl?.espnProj?.week === this.week ? this.nfl.espnProj.lines : undefined;
+    const srcProj = (raw: Player) => {
+      const next = projByWeek.get(this.week)?.lines[raw.id];
+      const espnLine = raw.espnId ? this.extras.espnProj?.[raw.espnId] ?? espnBackup?.[raw.espnId] : undefined;
+      return { s: next ? scoreLine(next.s, this.scoring) : null, e: espnLine ? scoreLine(espnLine, this.scoring) : null };
+    };
+    // FantasyPros only publishes its top 10 projections per position for free. For everyone else,
+    // its weekly expert consensus rank stands in: rank N at a position is worth what the Nth-best
+    // Sleeper/ESPN projection at that position is worth this week.
+    const ladder = new Map<string, number[]>();
+    for (const raw of Object.values(this.players)) {
+      if (!raw.team) continue;
+      const { s: ps, e: pe } = srcProj(raw);
+      const b = blendProjections([["sleeper", ps], ["espn", pe]], pb);
+      if (b != null && b > 0) {
+        if (!ladder.has(raw.pos)) ladder.set(raw.pos, []);
+        ladder.get(raw.pos)!.push(b);
+      }
+    }
+    for (const l of ladder.values()) l.sort((x, y) => y - x);
+    const rankPts = (pos: string, rank: number) => {
+      const l = ladder.get(pos);
+      if (!l?.length || !(rank > 0)) return null;
+      const r = Math.min(l.length, Math.max(1, rank)) - 1;
+      const lo = Math.floor(r);
+      const hi = Math.min(l.length - 1, lo + 1);
+      return l[lo] + (l[hi] - l[lo]) * (r - lo);
+    };
 
     for (const raw of Object.values(this.players)) {
       const espn = raw.pos === "DEF" ? null : this.espnFor(raw);
@@ -476,13 +507,13 @@ export class LeagueModel {
       const pts = log.map((g) => g.pts);
       const ppg = avg(pts);
       const last3 = avg(pts.slice(-3));
-      const next = projByWeek.get(this.week)?.lines[p.id];
-      const projSleeper = next ? scoreLine(next.s, this.scoring) : null;
-      const espnBackup = this.nfl?.espnProj?.week === this.week ? this.nfl.espnProj.lines : undefined;
-      const espnLine = raw.espnId ? this.extras.espnProj?.[raw.espnId] ?? espnBackup?.[raw.espnId] : undefined;
-      const projEspn = espnLine ? scoreLine(espnLine, this.scoring) : null;
+      const { s: projSleeper, e: projEspn } = srcProj(raw);
+      const ecr = this.ecrFor(raw);
       const fpLine = this.fpLine(p);
-      const projFp = fpLine ? scoreLine(fpLine, this.scoring) : null;
+      // Weekly expert ranks already drop players who might sit, and chance to play is applied
+      // separately, so a rank only stands in for healthy players (no double penalty).
+      const projFpRank = !fpLine && ecr.wk != null && p.team && !p.injury ? ecr.wk : null;
+      const projFp = fpLine ? scoreLine(fpLine, this.scoring) : projFpRank != null ? rankPts(p.pos, projFpRank) : null;
       // Independent studies (Fantasy Football Analytics, 2015-2025) find an average of projection
       // sources beats nearly every single source. Weights are learned by calibrate.py and pulled
       // halfway toward equal, because the "best" source changes from year to year.
@@ -492,7 +523,7 @@ export class LeagueModel {
           ["espn", projEspn],
           ["fantasypros", projFp],
         ],
-        this.extras.nfl?.calib?.projBlend ?? null
+        pb
       );
 
       // Rest-of-season value should not depend on this week's opponent: strip the matchup and
@@ -533,7 +564,6 @@ export class LeagueModel {
         valuePg = 0.85 * valuePg + 0.15 * xfpRaw * conv;
       }
 
-      const ecr = this.ecrFor(raw);
       const lastGame = log[log.length - 1];
       const carSum = log.reduce((a, g) => a + g.carries, 0);
       const carTeam = log.reduce((a, g) => a + g.teamCarries, 0);
@@ -568,6 +598,7 @@ export class LeagueModel {
         projSleeper: projSleeper == null ? null : round1(projSleeper),
         projEspn: projEspn == null ? null : round1(projEspn),
         projFp: projFp == null ? null : round1(projFp),
+        projFpRank: projFp == null || projFpRank == null ? null : round1(projFpRank),
         projNeutral: projRos == null ? null : round1(projRos),
         ecrRos: ecr.ros?.[0] ?? null,
         ecrSd: ecr.ros?.[1] ?? null,
@@ -707,10 +738,9 @@ export class LeagueModel {
       // Projections react to depth-chart news within hours; lean on them harder when a teammate
       // at the same position is unlikely to play (his work has to go somewhere). The matchup and
       // Vegas factors below are applied once, so use the projection with them taken out.
-      const w = this.teammateOut(id) ? 0.85 : v.ecrWeek != null ? 0.55 : 0.6;
+      // FantasyPros' weekly consensus is already one of the projection's three sources.
+      const w = this.teammateOut(id) ? 0.85 : 0.6;
       base = w * v.projNeutral + (1 - w) * v.valuePg;
-      // Expert consensus for this exact week, when it's current, as a third opinion.
-      if (v.ecrWeek != null) base = 0.85 * base + 0.15 * this.weeklyRankPoints(v.p.pos, v.ecrWeek);
     }
     return base * mult * this.matchupFactor(v.p.pos, g.opp) * this.vegasFactor(v.p.pos, g, week);
   }
