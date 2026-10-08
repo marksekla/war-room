@@ -20,6 +20,7 @@ import math
 import os
 import sys
 import time
+import urllib.request
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -275,6 +276,47 @@ def expert_rankings(ids: pd.DataFrame, games: pd.DataFrame, season: int, history
         history.setdefault(str(season), {})[str(nxt)] = snap
     log(f"  expert rankings {date} ({out['src']}): {len(out['ros'])} rest-of-season, {len(out['wk'])} weekly (week {wk_week})")
     return out, history
+
+
+ESPN_LINE = {"0": "pass_att", "1": "pass_cmp", "3": "pass_yd", "4": "pass_td", "19": "pass_2pt", "20": "pass_int",
+             "23": "rush_att", "24": "rush_yd", "25": "rush_td", "26": "rush_2pt", "53": "rec", "42": "rec_yd",
+             "43": "rec_td", "44": "rec_2pt", "58": "rec_tgt", "72": "fum_lost"}
+
+
+def espn_projections(season: int, week: int | None) -> dict | None:
+    """ESPN's projections for the coming week, keyed by ESPN id. The site also asks ESPN directly every
+    2 hours; this copy is the backup for when that request fails."""
+    if not week:
+        return None
+    filt = {"players": {"filterSlotIds": {"value": [0, 2, 4, 6]}, "limit": 900,
+                        "sortPercOwned": {"sortPriority": 1, "sortAsc": False}}}
+    url = (f"https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/{season}/segments/0/leaguedefaults/3"
+           f"?scoringPeriodId={week}&view=kona_player_info")
+    try:
+        req = urllib.request.Request(url, headers={"accept": "application/json", "user-agent": "war-room",
+                                                   "x-fantasy-filter": json.dumps(filt)})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            j = json.loads(r.read().decode("utf-8"))
+    except Exception as e:  # noqa: BLE001
+        log(f"  ESPN projections week {week} unavailable ({e.__class__.__name__})")
+        return None
+    lines = {}
+    for row in j.get("players", []):
+        pl = row.get("player") or {}
+        pid = pl.get("id") or row.get("id")
+        if pid is None:
+            continue
+        for st in pl.get("stats") or []:
+            if st.get("statSourceId") == 1 and st.get("scoringPeriodId") == week and st.get("seasonId") == season \
+                    and (st.get("statSplitTypeId") or 1) == 1:
+                line = {ESPN_LINE[k]: round(float(v), 2) for k, v in (st.get("stats") or {}).items() if k in ESPN_LINE and v}
+                if pl.get("defaultPositionId") == 4 and line.get("rec"):
+                    line["bonus_rec_te"] = line["rec"]
+                if line:
+                    lines[str(pid)] = line
+                break
+    log(f"  ESPN projections week {week}: {len(lines)} players")
+    return {"week": week, "lines": lines} if lines else None
 
 
 def consensus_projections(ids: pd.DataFrame, week: int | None) -> dict | None:
@@ -710,6 +752,10 @@ def main() -> None:
     except Exception as e:  # noqa: BLE001 - a bonus source, never block the build
         log(f"FantasyPros projections failed ({e.__class__.__name__}: {e})")
         data["fpProj"] = None
+    # When a FantasyPros page can't be used, keep a short note of what it looked like so it can be fixed.
+    bad = {k: v for k, v in fp.DIAG.items() if "error" in v or v.get("passRate", 1) < 0.7}
+    data["fpDiag"] = bad or None
+    data["espnProj"] = espn_projections(season, nxt)
     data["pracLog"] = practice_log(inj, old_prac, nxt)
     try:
         data["calib"] = (

@@ -189,7 +189,7 @@ export default function Settings({ onClose }: { onClose: () => void }) {
               <li>League, rosters, scoring, matchups, transactions: Sleeper (1-5 minutes behind)</li>
               <li>
                 Projections: Sleeper, ESPN and FantasyPros consensus, averaged
-                {nfl?.fpProj ? ` (FantasyPros week ${nfl.fpProj.week}, ${nfl.fpProj.date})` : nfl ? " (FantasyPros not loaded yet, using Sleeper and ESPN)" : ""}
+                {model ? ` (${projStatus(model)})` : ""}
               </li>
               <li>
                 Expert rankings (rest of season and weekly): FantasyPros consensus
@@ -241,6 +241,13 @@ export default function Settings({ onClose }: { onClose: () => void }) {
       </div>
     </div>
   );
+}
+
+function projStatus(m: NonNullable<ReturnType<typeof useLeague>["model"]>) {
+  const live = m.extras.espnProj && Object.keys(m.extras.espnProj).length > 0;
+  const espn = live ? "ESPN live" : m.nfl?.espnProj?.week === m.week ? "ESPN from the backup copy" : "ESPN not loaded";
+  const fp = m.nfl?.fpProj?.week === m.week ? `FantasyPros week ${m.week}, ${m.nfl.fpProj.date}` : "FantasyPros not loaded yet";
+  return `Sleeper live · ${espn} · ${fp}`;
 }
 
 function hasValues(m: NonNullable<ReturnType<typeof useLeague>["model"]>) {

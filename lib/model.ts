@@ -478,7 +478,8 @@ export class LeagueModel {
       const last3 = avg(pts.slice(-3));
       const next = projByWeek.get(this.week)?.lines[p.id];
       const projSleeper = next ? scoreLine(next.s, this.scoring) : null;
-      const espnLine = raw.espnId ? this.extras.espnProj?.[raw.espnId] : undefined;
+      const espnBackup = this.nfl?.espnProj?.week === this.week ? this.nfl.espnProj.lines : undefined;
+      const espnLine = raw.espnId ? this.extras.espnProj?.[raw.espnId] ?? espnBackup?.[raw.espnId] : undefined;
       const projEspn = espnLine ? scoreLine(espnLine, this.scoring) : null;
       const fpLine = this.fpLine(p);
       const projFp = fpLine ? scoreLine(fpLine, this.scoring) : null;

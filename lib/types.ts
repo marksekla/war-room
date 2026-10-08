@@ -225,6 +225,10 @@ export interface NflData {
   ecr?: { date: string; week: number | null; ros: Record<string, [number, number | null]>; wk: Record<string, number>; src?: string } | null;
   /** FantasyPros consensus projections for one week: stat lines keyed by Sleeper id (or n:name:team). */
   fpProj?: { week: number; date: string; lines: Record<string, Record<string, number>> } | null;
+  /** Backup copy of ESPN's projections for one week (keyed by ESPN id), used when the live ESPN request fails. */
+  espnProj?: { week: number; lines: Record<string, Record<string, number>> } | null;
+  /** Notes on FantasyPros pages that couldn't be read on the last data build. */
+  fpDiag?: Record<string, unknown> | null;
   /** Practice participation changes this week, by gsis id: { Wed: "DNP", Thu: "LP" }. */
   pracLog?: { w: number; p: Record<string, Record<string, "DNP" | "LP" | "FP">> } | null;
 }

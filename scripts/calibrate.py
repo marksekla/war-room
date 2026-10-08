@@ -23,7 +23,7 @@ import pandas as pd
 NFLVERSE = "https://github.com/nflverse/nflverse-data/releases/download"
 FFOPP = "https://github.com/ffverse/ffopportunity/releases/download/latest-data"
 POS = ["QB", "RB", "WR", "TE"]
-VERSION = 5
+VERSION = 6
 
 # ESPN stat id -> (Sleeper-style key) for PPR scoring of ESPN projections.
 ESPN_STAT = {"3": "pass_yd", "4": "pass_td", "20": "pass_int", "24": "rush_yd", "25": "rush_td",

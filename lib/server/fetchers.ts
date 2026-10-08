@@ -532,7 +532,7 @@ export function getEspnProjections(season: number, week: number): Promise<Record
     };
     const res = await fetch(
       `https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/${season}/segments/0/leaguedefaults/3?scoringPeriodId=${week}&view=kona_player_info`,
-      { headers: { accept: "application/json", "x-fantasy-filter": JSON.stringify(filter) }, cache: "no-store" }
+      { headers: { accept: "application/json", "user-agent": "war-room", "x-fantasy-filter": JSON.stringify(filter) }, cache: "no-store" }
     );
     if (!res.ok) throw new Error(`ESPN projections ${res.status}`);
     const j = (await res.json()) as { players?: EspnKonaPlayer[] };

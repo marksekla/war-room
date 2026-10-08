@@ -71,7 +71,8 @@ def fetch(url: str, timeout: int = 20, tries: int = 2) -> str:
 
 
 class _DataTable(HTMLParser):
-    """Collects the rows of <table id="data">: each cell's text, colspan and FantasyPros id."""
+    """Collects the rows of <table id="data">: each cell's text, colspan and FantasyPros id.
+    Text inside high/low range markers (min-cell / max-cell) is ignored so only the consensus number is read."""
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -79,6 +80,7 @@ class _DataTable(HTMLParser):
         self.rows: list[dict] = []
         self.row: dict | None = None
         self.cell: dict | None = None
+        self.skip: list[str] = []  # open tags whose text is ignored
 
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
@@ -90,8 +92,13 @@ class _DataTable(HTMLParser):
             return
         if not self.depth:
             return
+        cls = a.get("class") or ""
+        if self.skip or re.search(r"\b(min|max)-cell\b", cls):
+            if tag not in VOID:
+                self.skip.append(tag)
+            return
         if tag == "tr":
-            m = re.search(r"mpb-player-(\d+)", a.get("class") or "")
+            m = re.search(r"mpb-player-(\d+)", cls)
             self.row = {"cells": [], "fpid": m.group(1) if m else None}
             self.rows.append(self.row)
         elif tag in ("td", "th") and self.row is not None:
@@ -99,12 +106,12 @@ class _DataTable(HTMLParser):
                 span = int(a.get("colspan") or 1)
             except ValueError:
                 span = 1
-            self.cell = {"th": tag == "th", "text": "", "span": span, "name": None}
+            self.cell = {"th": tag == "th", "text": "", "span": span, "name": None, "player": "player-label" in cls}
             self.row["cells"].append(self.cell)
         elif tag == "a" and self.cell is not None:
-            cls = a.get("class") or ""
-            if "fp-player-link" in cls or a.get("fp-player-name"):
-                m = re.search(r"fp-id-(\d+)", cls) or re.search(r"(\d+)\s*$", cls)
+            if "fp-player-link" in cls or a.get("fp-player-name") or "player-name" in cls:
+                self.cell["player"] = True
+                m = re.search(r"fp-id-(\d+)", cls)
                 if m and self.row is not None and not self.row["fpid"]:
                     self.row["fpid"] = m.group(1)
                 if a.get("fp-player-name"):
@@ -112,6 +119,10 @@ class _DataTable(HTMLParser):
 
     def handle_endtag(self, tag):
         if not self.depth:
+            return
+        if self.skip:
+            if tag == self.skip[-1]:
+                self.skip.pop()
             return
         if tag == "table":
             self.depth -= 1
@@ -121,66 +132,55 @@ class _DataTable(HTMLParser):
             self.row = None
 
     def handle_data(self, data):
-        if self.cell is not None:
+        if self.cell is not None and not self.skip:
             self.cell["text"] += data
 
 
+VOID = {"br", "img", "input", "hr", "meta", "link", "wbr", "source"}
+NUM = re.compile(r"^\s*(-?\d[\d,]*(?:\.\d+)?|-?\.\d+)")
+
+
 def _num(s: str) -> float | None:
-    s = s.strip().replace(",", "")
+    """The number a cell starts with ("32.2", "1,204.5", "32.2 (29-35)"); None for text."""
+    m = NUM.match(s or "")
+    if not m:
+        return None
     try:
-        return float(s)
+        return float(m.group(1).replace(",", ""))
     except ValueError:
         return None
 
 
 def _check_pts(st: dict) -> list[float]:
-    """PPR points from the stat line under the two common INT values (FantasyPros' FPTS is PPR, 4-pt pass TD)."""
-    base = (
-        st.get("rec", 0) + 0.1 * (st.get("rush_yd", 0) + st.get("rec_yd", 0)) + 6 * (st.get("rush_td", 0) + st.get("rec_td", 0))
-        + 0.04 * st.get("pass_yd", 0) + 4 * st.get("pass_td", 0) - 2 * st.get("fum_lost", 0)
-    )
-    return [base - st.get("pass_int", 0), base - 2 * st.get("pass_int", 0)]
+    """Point totals the stat line could produce under common scoring (PPR / half / standard,
+    4- or 6-pt pass TDs, -1 or -2 INTs). Used only to confirm the columns were read in the right order."""
+    rec, yd = st.get("rec", 0), 0.1 * (st.get("rush_yd", 0) + st.get("rec_yd", 0))
+    td = 6 * (st.get("rush_td", 0) + st.get("rec_td", 0)) - 2 * st.get("fum_lost", 0) + 0.04 * st.get("pass_yd", 0)
+    out = []
+    for r in (1, 0.5, 0):
+        for ptd in (4, 6):
+            for ip in (1, 2):
+                out.append(r * rec + yd + td + ptd * st.get("pass_td", 0) - ip * st.get("pass_int", 0))
+    return out
 
 
-def parse_projections(html: str, pos: str) -> list[dict]:
-    """Rows of one projections page -> [{fpid, name, team, s: {stat: value}, fpts}]. Empty if the page looks wrong."""
-    t = _DataTable()
-    t.feed(html)
-    def is_data(r):
-        return sum(_num(c["text"]) is not None for c in r["cells"]) >= 3
+DIAG: dict[str, dict] = {}  # what each page looked like on the last read (written to nfl.json when a page fails)
 
-    rows = [r for r in t.rows if r["cells"]]
-    first = next((i for i, r in enumerate(rows) if is_data(r)), len(rows))
-    head = rows[:first]
-    body = [r for r in rows[first:] if is_data(r)]
-    # Column names from the two header rows (group row with colspans, then labels).
-    keys: list[str | None] = []
-    if len(head) >= 2:
-        groups: list[str] = []
-        for c in head[-2]["cells"]:
-            groups += [c["text"].strip().upper()] * c["span"]
-        labels = [c["text"].strip().upper() for c in head[-1]["cells"]]
-        # A "Player" header spanning both rows shows up in only one of them.
-        if len(groups) == len(labels) + 1:
-            labels = [""] + labels
-        elif len(labels) == len(groups) + 1:
-            groups = [""] + groups
-        if len(groups) == len(labels):
-            keys = [COLS.get((g, l)) for g, l in zip(groups, labels)]
-    if not keys or sum(k is not None for k in keys) < len(FALLBACK[pos]) - 1:
-        keys = [None] + FALLBACK[pos]  # player column first
+
+def _rows_with(body: list[dict], keys: list[str], align: str) -> list[dict]:
     out = []
     for r in body:
         cells = r["cells"]
-        if len(cells) != len(keys):
+        pi = next((i for i, c in enumerate(cells) if c["player"] or c["name"]), 0)
+        vals = [_num(c["text"]) for c in cells[pi + 1:]]
+        if len(vals) < len(keys):
             continue
-        st = {}
-        for k, c in zip(keys, cells):
-            if k:
-                v = _num(c["text"])
-                if v is not None:
-                    st[k] = v
-        player = cells[0]
+        vals = vals[: len(keys)] if align == "head" else vals[len(vals) - len(keys):]
+        st = {k: v for k, v in zip(keys, vals) if v is not None}
+        fpts = st.pop("fpts", None)
+        if fpts is None or not st:
+            continue
+        player = cells[pi]
         text = " ".join(player["text"].split())
         name = (player["name"] or "").strip()
         rest = text.replace(name, " ") if name and name in text else text
@@ -188,23 +188,68 @@ def parse_projections(html: str, pos: str) -> list[dict]:
         team = words[-1] if words and re.fullmatch(r"[A-Z]{2,3}", words[-1]) else None
         if not name:
             name = " ".join(words[:-1] if team else words)
-        fpts = st.pop("fpts", None)
-        if fpts is None or not st:
-            continue
         out.append({"fpid": r["fpid"], "name": name, "team": team, "s": {k: round(v, 2) for k, v in st.items()}, "fpts": fpts})
-    # Sanity check: the stat columns must add up to FantasyPros' own point total, or the
-    # columns were read wrong and none of it is used.
-    if len(out) < 20:
-        return []
+    return out
+
+
+def _pass_rate(rows: list[dict], pos: str) -> float:
+    if not rows:
+        return 0.0
     ok = 0
-    for r in out:
+    for r in rows:
         tol = max(1.0, 0.06 * r["fpts"]) if pos == "qb" else max(0.6, 0.04 * r["fpts"])
         if min(abs(x - r["fpts"]) for x in _check_pts(r["s"])) <= tol:
             ok += 1
-    if ok / len(out) < 0.7:
-        log(f"  FantasyPros {pos} projections failed the points check ({ok}/{len(out)}); skipped")
+    return ok / len(rows)
+
+
+def parse_projections(html: str, pos: str) -> list[dict]:
+    """Rows of one projections page -> [{fpid, name, team, s: {stat: value}, fpts}]. Empty if the page looks wrong."""
+    t = _DataTable()
+    t.feed(html)
+
+    def is_data(r):
+        return sum(_num(c["text"]) is not None for c in r["cells"]) >= 3
+
+    rows = [r for r in t.rows if r["cells"]]
+    first = next((i for i, r in enumerate(rows) if is_data(r)), len(rows))
+    head = rows[:first]
+    body = [r for r in rows[first:] if is_data(r)]
+    diag = {"htmlKB": round(len(html) / 1024), "table": t.depth == 0 and bool(t.rows), "rows": len(body),
+            "head": [[c["text"].strip()[:12] for c in h["cells"]] for h in head[-2:]],
+            "sample": [c["text"].strip()[:24] for c in body[0]["cells"]] if body else []}
+    # Candidate column orders: from the header rows (group row with colspans, then labels), and the known layout.
+    cands: list[list[str]] = []
+    if len(head) >= 2:
+        groups: list[str] = []
+        for c in head[-2]["cells"]:
+            groups += [c["text"].strip().upper()] * c["span"]
+        labels = [c["text"].strip().upper() for c in head[-1]["cells"]]
+        if len(groups) == len(labels) + 1:
+            labels = [""] + labels
+        elif len(labels) == len(groups) + 1:
+            groups = [""] + groups
+        if len(groups) == len(labels):
+            ks = [COLS.get((g, l)) for g, l in zip(groups, labels)]
+            first_stat = next((i for i, k in enumerate(ks) if k), None)
+            if first_stat is not None:
+                ks = ks[first_stat:]
+                if all(ks) and len(ks) >= len(FALLBACK[pos]) - 1:
+                    cands.append(ks)  # type: ignore[arg-type]
+    cands.append(FALLBACK[pos])
+    best, best_rate = [], 0.0
+    for ks in cands:
+        for align in ("head", "tail"):
+            got = _rows_with(body, ks, align)
+            rate = _pass_rate(got, pos)
+            if len(got) >= 20 and rate > best_rate:
+                best, best_rate = got, rate
+    diag["passRate"] = round(best_rate, 2)
+    DIAG[pos] = diag
+    if best_rate < 0.7:
+        log(f"  FantasyPros {pos} projections didn't look right ({diag}); skipped")
         return []
-    return out
+    return best
 
 
 def projections(week: int, year: int | None = None, positions=PROJ_POS, pause: float = 0.8) -> dict[str, list[dict]]:
@@ -216,6 +261,7 @@ def projections(week: int, year: int | None = None, positions=PROJ_POS, pause: f
             rows = parse_projections(fetch(url), pos)
         except Exception as e:  # noqa: BLE001
             log(f"  FantasyPros {pos} week {week}{' ' + str(year) if year else ''} projections unavailable ({e.__class__.__name__})")
+            DIAG[pos] = {"error": f"{e.__class__.__name__}: {str(e)[:120]}"}
             rows = []
         if rows:
             out[pos.upper()] = rows
