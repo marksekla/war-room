@@ -21,7 +21,7 @@ import os
 import sys
 import time
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -29,6 +29,7 @@ import pandas as pd
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from calibrate import calibrate  # noqa: E402  self-calibration lives next to this file
 import fantasypros as fp  # noqa: E402
+import nfl_official  # noqa: E402
 
 NFLVERSE = "https://github.com/nflverse/nflverse-data/releases/download"
 FFOPP = "https://github.com/ffverse/ffopportunity/releases/download/latest-data"
@@ -349,7 +350,14 @@ def practice_log(inj: pd.DataFrame, prev: dict | None, upcoming_week: int | None
     if upcoming_week and cur_week < upcoming_week:
         return {"w": upcoming_week, "p": {}}  # this week's reports haven't started yet
     prev = prev if prev and prev.get("w") == cur_week else {"w": cur_week, "p": {}}
-    day = DAYS[datetime.now(ZoneInfo("America/New_York")).weekday()]
+    # Which practice the data can be describing. Teams practice late morning and post the report in
+    # the afternoon, and nflverse picks it up hours later, so before 10am ET it's still yesterday's.
+    # (Labeling by the run's own date put "Thu" on Wednesday's report when a build ran after midnight.)
+    day_i = (datetime.now(ZoneInfo("America/New_York")) - timedelta(hours=10)).weekday()
+    day = DAYS[day_i]
+    if day_i < 6:  # drop any day this week that hasn't happened yet (cleans up earlier mislabels)
+        prev = {"w": prev["w"], "p": {g: {d: st for d, st in ds.items() if d in DAYS and DAYS.index(d) <= day_i}
+                                      for g, ds in prev.get("p", {}).items()}}
     short = {"Did Not Participate In Practice": "DNP", "Limited Participation in Practice": "LP",
              "Full Participation in Practice": "FP"}
     rows = inj[(inj.season_type == "REG") & (inj.week == cur_week)]
@@ -364,6 +372,29 @@ def practice_log(inj: pd.DataFrame, prev: dict | None, upcoming_week: int | None
             days[day] = st
         out["p"][r.gsis_id] = days
     return out
+
+
+def merge_official(inj: pd.DataFrame, rows: list[dict], season: int, week: int) -> pd.DataFrame:
+    """Lay the official nfl.com report for `week` over nflverse's copy (which lags by hours)."""
+    recs = []
+    for r in rows:
+        parts = [x.strip() for x in (r["injury"] or "").split(",") if x.strip()]
+        recs.append({
+            "season": season, "season_type": "REG", "game_type": "REG", "team": r["team"], "week": week,
+            "gsis_id": r.get("gsis"), "position": r["pos"], "full_name": r["name"],
+            "report_primary_injury": parts[0] if parts else None,
+            "report_secondary_injury": parts[1] if len(parts) > 1 else None,
+            "report_status": r["game"], "practice_primary_injury": parts[0] if parts else None,
+            "practice_secondary_injury": parts[1] if len(parts) > 1 else None, "practice_status": r["practice"],
+        })
+    new = pd.DataFrame(recs)
+    if inj.empty:
+        return new
+    ids_ = set(new.gsis_id.dropna())
+    names = {(n, t) for n, t in zip(new.full_name, new.team)}
+    same_week = inj.week == week
+    drop = same_week & (inj.gsis_id.isin(ids_) | pd.Series([(n, team(t)) in names for n, t in zip(inj.full_name, inj.team)], index=inj.index))
+    return pd.concat([inj[~drop], new], ignore_index=True)
 
 
 def default_season() -> int:
@@ -389,6 +420,22 @@ def main() -> None:
             break
     xfp = read(f"{FFOPP}/ep_weekly_{season}.csv")
     ids = read(IDS)
+    # The official injury report straight from nfl.com, laid over nflverse's slower copy.
+    official = None
+    wk_up = upcoming_week(games, season) if not games.empty else None
+    if wk_up:
+        try:
+            rows, diag = nfl_official.report(season, wk_up, ids)
+        except Exception as e:  # noqa: BLE001 - a bonus source, never block the build
+            rows, diag = [], {"error": f"{e.__class__.__name__}: {e}"}
+        official = {"w": wk_up, "n": len(rows), "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ")}
+        if rows:
+            inj = merge_official(inj, rows, season, wk_up)
+            official.update({"matched": diag.get("matched"), "teams": diag.get("teams")})
+            log(f"  nfl.com injury report week {wk_up}: {len(rows)} players, {diag.get('teams')} teams, {diag.get('matched')} matched")
+        else:
+            official["diag"] = diag
+            log(f"  nfl.com injury report week {wk_up}: nothing usable ({diag})")
     ngs = {t: read(f"{NFLVERSE}/nextgen_stats/ngs_{t}.csv.gz") for t in ("receiving", "rushing", "passing")}
 
     # ---------------- ID maps ----------------
@@ -757,6 +804,7 @@ def main() -> None:
     data["fpDiag"] = bad or None
     data["espnProj"] = espn_projections(season, nxt)
     data["pracLog"] = practice_log(inj, old_prac, nxt)
+    data["officialReport"] = official
     try:
         data["calib"] = (
             calibrate(season, max_week, ids, games, prev, data["marketHistory"], data["ecrHistory"])

@@ -845,6 +845,8 @@ export class LeagueModel {
     if (news) for (const d of news.days) days.set(d.day, d.st);
     const pr = v.adv?.prac;
     const prThisWeek = pr && pr.w === this.week ? pr : null;
+    // A practice can't be reported before it happens: drop any day later than what's possible right now.
+    for (const d of [...days.keys()]) if (!practiceDayHappened(d, kick, now)) days.delete(d);
     if (prThisWeek?.st && !days.size) days.set("Latest", prThisWeek.st);
     const practice = [...days.entries()].map(([day, st]) => ({ day, st })).sort((a, b) => DAY_ORDER.indexOf(a.day) - DAY_ORDER.indexOf(b.day));
     const last = practice.length ? practice[practice.length - 1].st : null;
@@ -2407,6 +2409,31 @@ export function injuryGroup(s: string | null | undefined): "soft" | "concussion"
 const WEEKDAY: Record<string, string> = { monday: "Mon", tuesday: "Tue", wednesday: "Wed", thursday: "Thu", friday: "Fri", saturday: "Sat", sunday: "Sun" };
 
 /** Reads an ESPN/Rotowire injury note for practice participation by day and status language. */
+const ET_FMT = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", hour12: false });
+
+function etParts(t: number) {
+  const p = Object.fromEntries(ET_FMT.formatToParts(new Date(t)).map((x) => [x.type, x.value]));
+  return { wd: p.weekday as string, y: +p.year, m: +p.month, d: +p.day, h: +p.hour % 24 };
+}
+
+/**
+ * Whether a practice day in this game's week has happened yet. The day is matched to its date in the
+ * week leading up to kickoff; reports for it can exist from about 10am ET that day (beat reporters
+ * post who's missing from the open part of practice; the official report follows in the afternoon).
+ */
+export function practiceDayHappened(day: string, kick: number, now: number): boolean {
+  if (!DAY_ORDER.includes(day) || day === "Latest") return true;
+  for (let k = 0; k < 8; k++) {
+    const t = kick - k * 86_400_000;
+    const e = etParts(t);
+    if (e.wd !== day) continue;
+    const off = (new Date(t).getUTCHours() - e.h + 24) % 24; // 4 in summer, 5 in winter
+    const tenAm = Date.UTC(e.y, e.m - 1, e.d, 10 + off);
+    return now >= tenAm;
+  }
+  return true;
+}
+
 export function parseInjuryNote(text: string) {
   const out = {
     days: [] as { day: string; st: "DNP" | "LP" | "FP" }[],
@@ -2421,7 +2448,11 @@ export function parseInjuryNote(text: string) {
   for (const sentence of t.split(/(?<=[.!?])\s+/)) {
     const s = sentence.toLowerCase();
     let st: "DNP" | "LP" | "FP" | null = null;
-    if (/(didn't|did not|wasn't able to|was unable to|unable to|sat out|held out of|absent from|not seen at|missed)\s+(\w+\s+)?(practice|practicing|session|workout)|did not participate|non-participant|\bdnp\b/.test(s))
+    // "Isn't expected to practice Thursday" / "will be limited Friday" predict a practice, they don't report one.
+    const future = /\b(expected to|set to|slated to|will|won't|plans to|planning to|likely to|could|may|might|hopes to|hoping to|going to|projected to)\s+(\w+\s+){0,2}(practice|practicing|be limited|participate|work out|return to practice|sit out)/.test(s);
+    if (future) {
+      // skip: not a practice report
+    } else if (/(didn't|did not|wasn't able to|was unable to|unable to|sat out|held out of|absent from|not seen at|missed)\s+(\w+\s+)?(practice|practicing|session|workout)|did not participate|non-participant|\bdnp\b/.test(s))
       st = "DNP";
     else if (/\blimited\b/.test(s)) st = "LP";
     else if (/practiced fully|full participant|full participation|fully participated|full practice|practiced in full|without limitations|no limitations/.test(s)) st = "FP";

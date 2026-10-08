@@ -108,6 +108,7 @@ It also tests itself honestly (trained on last season, scored on this season's g
 | League, rosters, scoring, standings, matchups | [Sleeper API](https://docs.sleeper.com) | ~1-2 min |
 | Transactions and trade history (this and last season) | Sleeper API | 5 min |
 | Weekly stats, projections, trending adds | Sleeper (public, undocumented endpoints) | 10 min to 2 h |
+| Official injury report (practice participation, game status) | nfl.com, laid over the nflverse copy | each data update (Wed-Sat evenings on the default schedule) |
 | Second projection source | ESPN fantasy (public, undocumented) | 2 h |
 | Third projection source: consensus of many sites | FantasyPros projections (top 10 per position) + weekly expert ranks | twice daily |
 | Injury designations | ESPN injuries feed + Sleeper | 15 min |
