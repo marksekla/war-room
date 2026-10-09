@@ -75,8 +75,8 @@ export default function StartSit({ model, myId }: { model: LeagueModel; myId: nu
         <td className="font-mono font-semibold neon-text">
           {exp.toFixed(1)}
           {cur && v.ecrWeek != null && (
-            <span className="block text-[10px] font-normal text-slate-500" title="FantasyPros expert consensus rank this week">
-              FP {v.p.pos}
+            <span className="block text-[10px] font-normal text-slate-500">
+              Wk{week} {v.p.pos}
               {Math.round(v.ecrWeek)}
             </span>
           )}
@@ -203,7 +203,7 @@ export default function StartSit({ model, myId }: { model: LeagueModel; myId: nu
         </div>
       </Panel>
       <p className="text-xs text-slate-500">
-        Expected points blend Sleeper, ESPN and FantasyPros consensus projections, FantasyPros weekly expert ranks, season-long usage, matchup and Vegas, times each player&apos;s chance to play (learned from past injury reports plus this week&apos;s practice reports and news). When a teammate is out, projections that already react to the depth chart count more. -2D means two of the opponent&apos;s defensive starters are out; OL-2 means two of his own linemen are out (hover or tap a player for names). ≋ ☂ ❄ mark wind, rain/snow or cold at kickoff. Check final news before lock; the AI agent can do that for you.
+        Expected points blend Sleeper, ESPN and FantasyPros consensus projections, FantasyPros weekly expert ranks, season-long usage, matchup and Vegas, times each player&apos;s chance to play (learned from past injury reports plus this week&apos;s practice reports and news). When a teammate is out, projections that already react to the depth chart count more. -2D means two of the opponent&apos;s defensive starters are out; OL-2 means two of his own linemen are out (hover or tap a player for names). ≋ ☂ ❄ mark wind, rain/snow or cold at kickoff. Under each projection, labels like Under each projection, Wk{week} RB10 style labels arequot;Wk{week} RB10Under each projection, Wk{week} RB10 style labels arequot; are the FantasyPros expert consensus rank for this week only. Check final news before lock; the AI agent can do that for you.
       </p>
     </div>
   );
