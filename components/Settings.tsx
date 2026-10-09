@@ -6,6 +6,7 @@ import { useLeague } from "@/lib/LeagueContext";
 import { DEFAULT_STRATEGY } from "@/lib/agent/strategy";
 import { COMPAT_PRESETS, listModels, PROVIDERS } from "@/lib/agent/run";
 import type { AiSettings, ProviderId } from "@/lib/types";
+import { IconSwitch, IconX } from "./icons";
 
 const SEARCH_LABEL: Record<ProviderId, string> = {
   anthropic: "Let the agent search the web for injury news and practice reports (small extra cost per search)",
@@ -68,7 +69,7 @@ export default function Settings({ onClose }: { onClose: () => void }) {
       <div className="panel panel-corners max-h-[90vh] w-full max-w-2xl overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
         <div className="mb-6 flex items-center justify-between">
           <h2 className="font-display text-lg font-semibold text-ink">Settings</h2>
-          <button className="btn btn-ghost" onClick={onClose}>✕</button>
+          <button className="icon-btn" onClick={onClose} aria-label="Close"><IconX size={17} /></button>
         </div>
 
         <div className="space-y-6">
@@ -87,15 +88,15 @@ export default function Settings({ onClose }: { onClose: () => void }) {
                   key={id}
                   onClick={() => switchProvider(id)}
                   className={`rounded-lg border px-3 py-2.5 text-left transition ${
-                    ai.provider === id ? "border-cyan-300/70 bg-cyan-400/10 shadow-glow" : "border-white/10 hover:border-cyan-400/30"
+                    ai.provider === id ? "border-accent bg-accenttint" : "border-line hover:border-accent/30"
                   }`}
                 >
-                  <div className="text-sm font-semibold text-slate-100">{PROVIDERS[id].label}</div>
-                  <div className={`text-[11px] ${id === "gemini" ? "text-lime-300" : "text-slate-500"}`}>{PROVIDERS[id].sub}</div>
+                  <div className="text-sm font-semibold text-ink">{PROVIDERS[id].label}</div>
+                  <div className={`text-[11px] ${id === "gemini" ? "text-good" : "text-muted"}`}>{PROVIDERS[id].sub}</div>
                 </button>
               ))}
             </div>
-            {provider.note && <p className="mt-2 text-xs text-slate-400">{provider.note}</p>}
+            {provider.note && <p className="mt-2 text-xs text-muted">{provider.note}</p>}
           </div>
 
           {ai.provider === "compat" && (
@@ -109,7 +110,7 @@ export default function Settings({ onClose }: { onClose: () => void }) {
                       setAi({ ...ai, baseUrl: p.url, model: "" });
                       setModels([]);
                     }}
-                    className={`rounded border px-2.5 py-1 text-xs ${ai.baseUrl === p.url ? "border-cyan-300/60 bg-cyan-400/10 text-cyan-100" : "border-white/10 text-slate-400 hover:text-slate-100"}`}
+                    className={`rounded border px-2.5 py-1 text-xs ${ai.baseUrl === p.url ? "border-accent/60 bg-accenttint text-accentstrong" : "border-line text-muted hover:text-ink"}`}
                   >
                     {p.name}
                   </button>
@@ -134,9 +135,9 @@ export default function Settings({ onClose }: { onClose: () => void }) {
               onChange={(e) => setAi({ ...ai, apiKey: e.target.value.trim() })}
               autoComplete="off"
             />
-            <p className="mt-2 text-xs text-slate-400">
+            <p className="mt-2 text-xs text-muted">
               Get one at{" "}
-              <a className="text-cyan-300 underline" href={keyUrl} target="_blank" rel="noreferrer">
+              <a className="text-accentstrong underline" href={keyUrl} target="_blank" rel="noreferrer">
                 {keyUrl.replace("https://", "")}
               </a>
               . Your key is stored only in this browser and sent straight to the provider, never to this site&apos;s server.
@@ -149,7 +150,7 @@ export default function Settings({ onClose }: { onClose: () => void }) {
               {models.length ? (
                 <select className="input" value={ai.model} onChange={(e) => setAi({ ...ai, model: e.target.value })}>
                   {models.map((m) => (
-                    <option key={m} value={m} className="bg-slate-900">
+                    <option key={m} value={m} className="bg-card">
                       {m}
                     </option>
                   ))}
@@ -167,9 +168,9 @@ export default function Settings({ onClose }: { onClose: () => void }) {
               </button>
             </div>
             {ai.provider === "compat" && ai.baseUrl?.includes("openrouter") && (
-              <p className="mt-2 text-xs text-slate-400">Free OpenRouter models end in &quot;:free&quot; and are listed first.</p>
+              <p className="mt-2 text-xs text-muted">Free OpenRouter models end in &quot;:free&quot; and are listed first.</p>
             )}
-            {modelErr && <p className="mt-2 text-xs text-rose-300">{modelErr}</p>}
+            {modelErr && <p className="mt-2 text-xs text-bad">{modelErr}</p>}
           </div>
 
           <label className="flex items-center gap-3 text-sm">
@@ -180,7 +181,7 @@ export default function Settings({ onClose }: { onClose: () => void }) {
           <div>
             <div className="mb-2 flex items-center justify-between">
               <div className="hud-title">Your strategy (the agent follows this)</div>
-              <button className="text-xs text-cyan-300 underline" onClick={() => setAi({ ...ai, strategy: DEFAULT_STRATEGY })}>
+              <button className="text-xs text-accentstrong underline" onClick={() => setAi({ ...ai, strategy: DEFAULT_STRATEGY })}>
                 Reset to default
               </button>
             </div>
@@ -191,8 +192,8 @@ export default function Settings({ onClose }: { onClose: () => void }) {
             />
           </div>
 
-          <details className="rounded-lg border border-white/10 bg-black/20 p-3 text-xs text-slate-400">
-            <summary className="cursor-pointer select-none text-slate-300">Data sources and freshness</summary>
+          <details className="rounded-lg border border-line bg-sunken p-3 text-xs text-muted">
+            <summary className="cursor-pointer select-none text-ink2">Data sources and freshness</summary>
             <ul className="mt-2 space-y-1">
               <li>League, rosters, scoring, matchups, transactions: Sleeper (1-5 minutes behind)</li>
               <li>
@@ -223,7 +224,7 @@ export default function Settings({ onClose }: { onClose: () => void }) {
               <li>Schedule, Vegas lines: ESPN · Weather: Open-Meteo · News: ESPN / Rotowire</li>
             </ul>
             {nfl?.calib && (
-              <p className="mt-2 text-slate-300">
+              <p className="mt-2 text-ink2">
                 Self-tuning: weights learned from {nfl.calib.n.toLocaleString()} player-games through week {nfl.calib.throughWeek}, refit every time a
                 week finishes.
                 {nfl.calib.accuracy?.warRoom != null && (
@@ -251,7 +252,8 @@ export default function Settings({ onClose }: { onClose: () => void }) {
                 onClose();
               }}
             >
-              ⇆ Switch league
+              <IconSwitch size={16} />
+              Switch league
             </button>
           )}
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>

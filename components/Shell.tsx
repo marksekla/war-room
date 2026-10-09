@@ -14,17 +14,40 @@ import Chat from "./Chat";
 import { PlayerDrawerProvider } from "./PlayerDrawer";
 import PlayerSearch from "./PlayerSearch";
 import { Spinner, ThemeToggle } from "./ui";
+import {
+  IconChevronDown,
+  IconDashboard,
+  IconLayers,
+  IconLineup,
+  IconPulse,
+  IconRefresh,
+  IconSliders,
+  IconSparkles,
+  IconSwitch,
+  IconTrade,
+  IconUserPlus,
+} from "./icons";
 
 export type Tab = "dashboard" | "waivers" | "lineup" | "trades" | "agent" | "health" | "depth";
 
-const NAV: { id: Tab; label: string; short: string; icon: string; title: string }[] = [
-  { id: "dashboard", label: "Command", short: "Home", icon: "⌂", title: "Command" },
-  { id: "agent", label: "AI Agent", short: "AI", icon: "✦", title: "AI Agent" },
-  { id: "trades", label: "Trades", short: "Trades", icon: "⇄", title: "Trades" },
-  { id: "waivers", label: "Waivers", short: "Waivers", icon: "⊕", title: "Waivers" },
-  { id: "lineup", label: "Start / Sit", short: "Start/Sit", icon: "☰", title: "Start / Sit" },
-  { id: "health", label: "Are they playing", short: "Playing?", icon: "✚", title: "Are they playing?" },
-  { id: "depth", label: "Depth charts", short: "Depth", icon: "☷", title: "Depth charts" },
+type IconT = (p: { className?: string; size?: number; strokeWidth?: number }) => React.ReactNode;
+type NavItem = { id: Tab; label: string; short: string; title: string; sub: string; Icon: IconT };
+
+const NAV: NavItem[] = [
+  { id: "dashboard", label: "Command", short: "Home", title: "Command", sub: "Your team at a glance", Icon: IconDashboard },
+  { id: "agent", label: "AI Agent", short: "AI", title: "AI Agent", sub: "Ask anything about your league", Icon: IconSparkles },
+  { id: "trades", label: "Trades", short: "Trades", title: "Trades", sub: "Find, build and grade trades", Icon: IconTrade },
+  { id: "waivers", label: "Waivers", short: "Waivers", title: "Waivers", sub: "The best pickups for your roster", Icon: IconUserPlus },
+  { id: "lineup", label: "Start / Sit", short: "Start/Sit", title: "Start / Sit", sub: "Set your best lineup for the week", Icon: IconLineup },
+  { id: "health", label: "Are they playing", short: "Playing?", title: "Are they playing?", sub: "Practice reports and game status", Icon: IconPulse },
+  { id: "depth", label: "Depth charts", short: "Depth", title: "Depth charts", sub: "Every team's depth chart and who has them", Icon: IconLayers },
+];
+
+const GROUPS: { label: string; ids: Tab[] }[] = [
+  { label: "Overview", ids: ["dashboard", "agent"] },
+  { label: "Roster moves", ids: ["trades", "waivers"] },
+  { label: "Game day", ids: ["lineup", "health"] },
+  { label: "Research", ids: ["depth"] },
 ];
 
 export default function Shell() {
@@ -33,9 +56,15 @@ export default function Shell() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
 
+  // Switching tabs starts the new page at the top.
+  const go = (t: Tab) => {
+    setTab(t);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0 });
+  };
+
   const askAgent = (prompt: string) => {
     setPendingPrompt(prompt);
-    setTab("agent");
+    go("agent");
   };
 
   if (!saved.leagueId) {
@@ -48,148 +77,139 @@ export default function Shell() {
   }
 
   const me = model && saved.rosterId != null ? model.team(saved.rosterId) : null;
+  const current = NAV.find((n) => n.id === tab)!;
+
+  const teamSelect = (cls: string) =>
+    model ? (
+      <select
+        className={`w-full cursor-pointer appearance-none truncate bg-transparent pr-5 outline-none ${cls}`}
+        value={saved.rosterId ?? ""}
+        onChange={(e) => setSaved({ rosterId: Number(e.target.value) })}
+        aria-label="Your team"
+      >
+        {model.teams.map((t) => (
+          <option key={t.rosterId} value={t.rosterId}>
+            {t.teamName} ({t.ownerName})
+          </option>
+        ))}
+      </select>
+    ) : null;
+
+  const sideItem = "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[14px] font-medium transition";
 
   return (
     <PlayerDrawerProvider model={model} askAgent={askAgent}>
       <div className="relative flex min-h-screen bg-page">
-        <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col bg-nav px-3 py-5 md:flex">
-          <div className="px-2">
+        {/* Desktop sidebar */}
+        <aside className="sticky top-0 hidden h-screen w-[248px] shrink-0 flex-col border-r border-line bg-card md:flex">
+          <div className="flex h-16 items-center px-5">
             <Brand />
           </div>
-          <nav className="mt-8 flex flex-col gap-1">
-            {NAV.map((n) => (
-              <button
-                key={n.id}
-                onClick={() => setTab(n.id)}
-                className={`group flex items-center gap-3 rounded-xl px-2.5 py-2 text-left text-[14px] font-medium transition ${
-                  tab === n.id ? "bg-navactive text-[#ffffff]" : "text-navtext hover:bg-navhover hover:text-[#ffffff]"
-                }`}
-              >
-                <span
-                  className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg text-base ${
-                    tab === n.id ? "bg-[#22c55e] text-[#ffffff]" : "bg-navhover text-navtext group-hover:text-[#ffffff]"
-                  }`}
-                >
-                  {n.icon}
-                </span>
-                <span>{n.label}</span>
-              </button>
+
+          <div className="px-3">
+            <div className="relative rounded-lg border border-line bg-sunken px-3 py-2.5">
+              <div className="truncate text-[13px] font-semibold text-ink">{model?.bundle.league.name ?? "Syncing..."}</div>
+              <div className="relative mt-0.5">
+                {teamSelect("text-[12px] text-muted")}
+                {model && <IconChevronDown size={14} className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-muted" />}
+              </div>
+            </div>
+          </div>
+
+          <nav className="mt-2 flex-1 overflow-y-auto px-3 pb-4">
+            {GROUPS.map((g) => (
+              <div key={g.label} className="mt-5">
+                <div className="mb-1.5 px-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-faint">{g.label}</div>
+                <div className="flex flex-col gap-0.5">
+                  {g.ids.map((id) => {
+                    const n = NAV.find((x) => x.id === id)!;
+                    const on = tab === id;
+                    return (
+                      <button
+                        key={id}
+                        onClick={() => go(id)}
+                        aria-current={on ? "page" : undefined}
+                        className={`${sideItem} ${on ? "bg-accenttint font-semibold text-accentstrong" : "text-ink2 hover:bg-hover hover:text-ink"}`}
+                      >
+                        <n.Icon size={18} className={on ? "text-accent" : "text-muted"} />
+                        <span>{n.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             ))}
           </nav>
-          <div className="mt-auto flex flex-col gap-1">
-            <ThemeToggle
-              label
-              className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left text-[14px] font-medium text-navtext transition hover:bg-navhover hover:text-[#ffffff] [&>span:first-child]:grid [&>span:first-child]:h-8 [&>span:first-child]:w-8 [&>span:first-child]:place-items-center [&>span:first-child]:rounded-lg [&>span:first-child]:bg-navhover"
-            />
-            <button
-              className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left text-[14px] font-medium text-navtext transition hover:bg-navhover hover:text-[#ffffff]"
-              onClick={() => setSettingsOpen(true)}
-            >
-              <span className="grid h-8 w-8 place-items-center rounded-lg bg-navhover">⚙</span>
+
+          <div className="flex flex-col gap-0.5 border-t border-line p-3">
+            <button className={`${sideItem} text-ink2 hover:bg-hover hover:text-ink`} onClick={() => setSettingsOpen(true)}>
+              <IconSliders size={18} className="text-muted" />
               Settings & AI key
+            </button>
+            <button className={`${sideItem} text-ink2 hover:bg-hover hover:text-ink`} onClick={() => setSaved({ leagueId: "", rosterId: null })}>
+              <IconSwitch size={18} className="text-muted" />
+              Switch league
             </button>
           </div>
         </aside>
 
         <main className="min-w-0 flex-1">
-          {/* Mobile header: one compact row */}
-          <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-line bg-card/95 px-4 pb-2.5 pt-[max(0.625rem,env(safe-area-inset-top))] backdrop-blur md:hidden">
+          {/* Mobile header */}
+          <header className="sticky top-0 z-20 flex items-center gap-2.5 border-b border-line bg-card/95 px-4 pb-2.5 pt-[max(0.625rem,env(safe-area-inset-top))] backdrop-blur md:hidden">
             <Brand compact />
             <div className="min-w-0 flex-1">
-              {model ? (
-                <select
-                  className="w-full truncate bg-transparent font-display text-sm font-semibold text-ink outline-none"
-                  value={saved.rosterId ?? ""}
-                  onChange={(e) => setSaved({ rosterId: Number(e.target.value) })}
-                >
-                  {model.teams.map((t) => (
-                    <option key={t.rosterId} value={t.rosterId}>
-                      {t.teamName} ({t.ownerName})
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <div className="font-display text-sm font-semibold text-slate-300">Syncing...</div>
-              )}
-              <div className="truncate text-[11px] text-slate-500">
-                {model ? `${model.bundle.league.name} · Week ${model.week}` : progress}
+              <div className="relative">
+                {model ? teamSelect("text-[14px] font-semibold text-ink") : <div className="text-sm font-semibold text-ink2">Syncing...</div>}
+                {model && <IconChevronDown size={14} className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-muted" />}
               </div>
+              <div className="truncate text-[11px] text-muted">{model ? `${model.bundle.league.name} · Week ${model.week}` : progress}</div>
             </div>
             {model && <PlayerSearch model={model} compact />}
-            <button
-              className="grid h-9 w-9 place-items-center rounded-full border border-line text-lg text-slate-300 active:bg-hover"
-              onClick={reload}
-              aria-label="Sync"
-            >
-              <span className={loading ? "animate-spin" : ""}>⟳</span>
+            <button className="icon-btn" onClick={reload} aria-label="Sync">
+              <IconRefresh size={17} className={loading ? "animate-spin" : ""} />
             </button>
-            <button
-              className="grid h-9 w-9 place-items-center rounded-full border border-line text-lg text-slate-300 active:bg-hover"
-              onClick={() => setSettingsOpen(true)}
-              aria-label="Settings"
-            >
-              ⚙
+            <button className="icon-btn" onClick={() => setSettingsOpen(true)} aria-label="Settings">
+              <IconSliders size={17} />
             </button>
           </header>
 
           {/* Desktop header */}
-          <header className="sticky top-0 z-20 hidden flex-wrap items-center gap-4 border-b border-line bg-card/95 px-8 py-3 backdrop-blur md:flex">
-            <div className="flex min-w-0 items-center gap-3 rounded-xl border border-line bg-card px-3 py-1.5 shadow-card">
-              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accenttint font-display text-sm font-bold text-accent">
-                {(me?.teamName ?? "W").slice(0, 1).toUpperCase()}
-              </div>
-              <div className="min-w-0">
-                <div className="max-w-[260px] truncate text-[13px] font-semibold text-ink">{model?.bundle.league.name ?? "Syncing..."}</div>
-                {model ? (
-                  <select
-                    className="max-w-[260px] truncate bg-transparent text-[13px] text-muted outline-none"
-                    value={saved.rosterId ?? ""}
-                    onChange={(e) => setSaved({ rosterId: Number(e.target.value) })}
-                  >
-                    {model.teams.map((t) => (
-                      <option key={t.rosterId} value={t.rosterId}>
-                        {t.teamName} ({t.ownerName})
-                      </option>
-                    ))}
-                  </select>
-                ) : null}
-              </div>
-            </div>
-            {model && (
-              <div className="rounded-lg border border-line bg-card px-3 py-1.5 text-[13px] font-semibold text-ink">Week {model.week}</div>
-            )}
+          <header className="sticky top-0 z-20 hidden h-16 items-center gap-4 border-b border-line bg-card/90 px-8 backdrop-blur md:flex">
+            {model ? <PlayerSearch model={model} /> : <div className="flex-1" />}
             <div className="ml-auto flex items-center gap-2">
-              {model && <PlayerSearch model={model} />}
-              {loading ? (
-                <Spinner label={progress || "Syncing"} />
-              ) : (
-                <button className="btn" onClick={reload} title="Re-sync league data">
-                  ⟳ Sync
-                </button>
+              {loading && <Spinner label={progress || "Syncing"} />}
+              {model && (
+                <span className="rounded-full border border-line px-3 py-1.5 text-[13px] font-semibold text-ink">Week {model.week}</span>
               )}
-              <button className="btn btn-ghost" onClick={() => setSaved({ leagueId: "", rosterId: null })} title="Switch league">
-                Switch
+              <button className="icon-btn" onClick={reload} title="Re-sync league data" aria-label="Sync">
+                <IconRefresh size={17} className={loading ? "animate-spin" : ""} />
               </button>
+              <ThemeToggle className="icon-btn" />
             </div>
           </header>
 
           {/* Mobile bottom tab bar */}
           <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-7 border-t border-line bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
-            {NAV.map((n) => (
-              <button
-                key={n.id}
-                onClick={() => setTab(n.id)}
-                className={`flex flex-col items-center gap-0.5 py-2.5 ${tab === n.id ? "text-accent" : "text-muted"}`}
-              >
-                <span className="text-xl leading-none">{n.icon}</span>
-                <span className="text-[9px] font-semibold">{n.short}</span>
-              </button>
-            ))}
+            {NAV.map((n) => {
+              const on = tab === n.id;
+              return (
+                <button
+                  key={n.id}
+                  onClick={() => go(n.id)}
+                  aria-current={on ? "page" : undefined}
+                  className={`relative flex flex-col items-center gap-1 pb-2 pt-2.5 ${on ? "text-accent" : "text-muted"}`}
+                >
+                  {on && <span className="absolute inset-x-3 top-0 h-0.5 rounded-full bg-accent" />}
+                  <n.Icon size={20} strokeWidth={on ? 2 : 1.75} />
+                  <span className={`text-[9.5px] ${on ? "font-semibold" : "font-medium"}`}>{n.short}</span>
+                </button>
+              );
+            })}
           </nav>
 
-          <div className="mx-auto max-w-[1400px] p-4 pb-28 md:p-8">
+          <div className="mx-auto max-w-[1400px] p-4 pb-28 md:px-8 md:pb-10 md:pt-7">
             {error && (
-              <div className="panel mb-6 border-rose-400/30 p-4 text-sm text-rose-200">
+              <div className="panel mb-6 border-bad/30 p-4 text-sm text-bad">
                 Could not load league data: {error}{" "}
                 <button className="underline" onClick={reload}>
                   Retry
@@ -203,8 +223,11 @@ export default function Shell() {
             )}
             {model && me && (
               <>
-                <h1 className="mb-5 hidden font-display text-[26px] font-bold text-ink md:block">{NAV.find((n) => n.id === tab)?.title}</h1>
-                {tab === "dashboard" && <Dashboard model={model} myId={me.rosterId} go={(t) => { setTab(t); window.scrollTo({ top: 0 }); }} />}
+                <div className="mb-4 md:mb-6">
+                  <h1 className="font-display text-xl font-semibold text-ink md:text-[24px]">{current.title}</h1>
+                  <p className="mt-0.5 hidden text-sm text-muted md:block">{current.sub}</p>
+                </div>
+                {tab === "dashboard" && <Dashboard model={model} myId={me.rosterId} go={go} />}
                 {tab === "waivers" && <Waivers model={model} myId={me.rosterId} />}
                 {tab === "lineup" && <StartSit model={model} myId={me.rosterId} />}
                 {tab === "health" && <Availability model={model} myId={me.rosterId} />}
@@ -229,13 +252,12 @@ export default function Shell() {
   );
 }
 
-export function Brand({ compact = false, onLight = false }: { compact?: boolean; onLight?: boolean }) {
+/** Logo: a plain monogram tile and the wordmark. */
+export function Brand({ compact = false }: { compact?: boolean; onLight?: boolean }) {
   return (
     <div className="flex items-center gap-2.5">
-      <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full border-[3px] border-[#f5b301] bg-[#2563eb] font-display text-sm font-bold text-[#ffffff]">
-        W
-      </div>
-      {!compact && <div className={`font-display text-[17px] font-semibold tracking-tight ${onLight ? "text-ink" : "text-[#ffffff]"}`}>War Room</div>}
+      <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent text-[15px] font-bold tracking-tight text-[#ffffff]">W</div>
+      {!compact && <div className="font-display text-[16px] font-semibold text-ink">War Room</div>}
     </div>
   );
 }

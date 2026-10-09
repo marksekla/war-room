@@ -3,38 +3,44 @@
 @tailwind utilities;
 
 :root {
-  --font-display: "Poppins", "Inter", system-ui, sans-serif;
+  --font-display: "Inter", system-ui, -apple-system, Segoe UI, sans-serif;
   --font-body: "Inter", system-ui, -apple-system, Segoe UI, sans-serif;
   --font-mono: "Inter", system-ui, -apple-system, Segoe UI, sans-serif;
 }
 
 html, body { background: rgb(var(--t-page)); color: rgb(var(--t-ink)); }
-body { font-family: var(--font-body); min-height: 100vh; overflow-x: hidden; -webkit-tap-highlight-color: transparent; }
+body { font-family: var(--font-body); min-height: 100vh; overflow-x: hidden; -webkit-tap-highlight-color: transparent; font-feature-settings: "cv11", "ss01"; }
+.font-display { letter-spacing: -0.011em; }
 /* Numbers line up in columns (the "mono" font is Inter with tabular figures). */
 .font-mono { font-variant-numeric: tabular-nums; letter-spacing: 0; }
 
 @layer components {
-  .panel { @apply relative rounded-2xl border border-line bg-card shadow-card; }
+  .panel { @apply relative rounded-xl border border-line bg-card shadow-card; }
   .panel-corners::before, .panel-corners::after { content: none; }
-  .hud-title { @apply font-display text-[13px] font-semibold normal-case tracking-normal text-ink; }
-  .panel-title { @apply font-display text-base font-semibold text-ink; }
+  .hud-title { @apply font-display text-[13px] font-semibold normal-case text-ink; }
+  .panel-title { @apply font-display text-[15px] font-semibold text-ink; }
   .tile-label { @apply text-[13px] font-medium text-muted; }
   .neon-text { color: rgb(var(--t-accentstrong)); }
   .neon-violet { color: rgb(var(--t-purplestrong)); }
   .btn {
-    @apply inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border px-3.5 py-2 text-sm font-semibold transition
-      border-linestrong bg-card text-accentstrong hover:border-accent hover:bg-accenttint2 disabled:opacity-40 disabled:pointer-events-none;
+    @apply inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border px-3.5 py-[7px] text-[13px] font-semibold transition
+      border-linestrong bg-card text-accentstrong hover:border-accent/60 hover:bg-accenttint2 disabled:opacity-40 disabled:pointer-events-none;
   }
+  .btn-primary { @apply border-accent bg-accent text-[#ffffff] hover:bg-accentstrong hover:border-accentstrong hover:text-[#ffffff]; }
   .btn-violet { @apply border-purpleline bg-card text-purplestrong hover:border-purple hover:bg-purpletint2; }
+  .icon-btn { @apply grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line bg-card text-ink2 transition hover:border-linestrong hover:bg-hover hover:text-ink; }
   .btn-ghost { @apply border-transparent bg-transparent text-ink2 hover:border-transparent hover:bg-hover; }
   .input {
     @apply w-full rounded-lg border border-linestrong bg-card px-3 py-2 text-base text-ink outline-none sm:text-sm
       placeholder:text-faint focus:border-accent focus:shadow-glow;
   }
   .tbl { @apply w-full text-sm; }
-  .tbl th { @apply whitespace-nowrap bg-sunken px-2.5 py-2.5 text-left font-body text-[11px] font-semibold uppercase tracking-wide text-muted; }
+  .tbl th { @apply whitespace-nowrap border-b border-line bg-sunken px-2.5 py-2 text-left font-body text-[11px] font-semibold uppercase tracking-[0.04em] text-muted; }
   .tbl td { @apply whitespace-nowrap border-t border-linesoft px-2.5 py-2.5; }
+  .tbl tbody tr:first-child td { @apply border-t-0; }
   .tbl tbody tr:hover { @apply bg-hover; }
+  .tbl th:first-child, .tbl td:first-child { @apply pl-4 sm:pl-5; }
+  .tbl th:last-child, .tbl td:last-child { @apply pr-4 sm:pr-5; }
   .tbl-sticky th:first-child, .tbl-sticky td:first-child { position: sticky; left: 0; z-index: 1; background: rgb(var(--t-card)); }
   .tbl-sticky th:first-child { background: rgb(var(--t-sunken)); }
   .tbl-sticky tbody tr:hover td:first-child { background: rgb(var(--t-hover)); }

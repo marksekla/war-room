@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { Position } from "@/lib/types";
+import { IconBarChart, IconListOrdered, IconMoon, IconSun, IconTarget, IconTrendUp } from "./icons";
 
 export function Panel({
   title,
@@ -32,34 +33,34 @@ export function Panel({
 }
 
 export function Stat({ label, value, sub, tone = "cyan" }: { label: string; value: React.ReactNode; sub?: React.ReactNode; tone?: "cyan" | "violet" | "lime" | "amber" }) {
-  const tones = { cyan: "text-ink", violet: "text-ink", lime: "text-ink", amber: "text-ink" };
-  const icon = { cyan: "bg-accenttint text-accent", violet: "bg-purpletint text-purple", lime: "bg-goodtint text-good", amber: "bg-warntint text-warn" };
+  const chip = { cyan: "bg-accenttint text-accent", violet: "bg-purpletint text-purple", lime: "bg-goodtint text-good", amber: "bg-warntint text-warn" };
+  const Icon = { cyan: IconListOrdered, violet: IconBarChart, lime: IconTrendUp, amber: IconTarget }[tone];
   return (
-    <div className="panel flex items-center gap-4 px-5 py-4">
-      <div className={`hidden h-11 w-11 shrink-0 place-items-center rounded-xl text-lg sm:grid ${icon[tone]}`}>
-        {{ cyan: "▥", violet: "◎", lime: "↗", amber: "↻" }[tone]}
+    <div className="panel flex items-start gap-3.5 px-4 py-4 sm:px-5">
+      <div className={`hidden h-10 w-10 shrink-0 place-items-center rounded-lg sm:grid ${chip[tone]}`}>
+        <Icon size={20} />
       </div>
       <div className="min-w-0">
         <div className="tile-label">{label}</div>
-        <div className={`font-display text-2xl font-semibold ${tones[tone]}`}>{value}</div>
-        {sub && <div className="mt-0.5 text-xs text-slate-500">{sub}</div>}
+        <div className="mt-0.5 font-display text-[22px] font-semibold leading-tight text-ink">{value}</div>
+        {sub && <div className="mt-1 text-xs leading-snug text-muted">{sub}</div>}
       </div>
     </div>
   );
 }
 
 const POS_STYLE: Record<string, string> = {
-  QB: "border-rose-400/50 text-rose-300 bg-rose-500/10",
-  RB: "border-emerald-400/50 text-emerald-300 bg-emerald-500/10",
-  WR: "border-cyan-400/50 text-cyan-300 bg-cyan-500/10",
-  TE: "border-amber-400/50 text-amber-300 bg-amber-500/10",
-  K: "border-slate-400/50 text-slate-300 bg-slate-500/10",
-  DEF: "border-violet-400/50 text-violet-300 bg-violet-500/10",
+  QB: "bg-rose-500/10 text-rose-400",
+  RB: "bg-emerald-500/10 text-emerald-400",
+  WR: "bg-cyan-500/10 text-cyan-400",
+  TE: "bg-amber-500/10 text-amber-500",
+  K: "bg-slate-500/10 text-slate-400",
+  DEF: "bg-violet-500/10 text-violet-400",
 };
 
 export function PosTag({ pos }: { pos: Position | string }) {
   return (
-    <span className={`inline-flex w-9 justify-center rounded border px-1 py-0.5 font-mono text-[10px] font-semibold ${POS_STYLE[pos] ?? POS_STYLE.K}`}>
+    <span className={`inline-flex w-9 justify-center rounded-md px-1 py-[3px] text-[10px] font-semibold leading-none tracking-wide ${POS_STYLE[pos] ?? POS_STYLE.K}`}>
       {pos}
     </span>
   );
@@ -67,43 +68,40 @@ export function PosTag({ pos }: { pos: Position | string }) {
 
 export function InjuryTag({ status }: { status: string | null }) {
   if (!status) return null;
-  const tone =
-    status === "Questionable"
-      ? "text-amber-300 border-amber-400/40 bg-amber-500/10"
-      : "text-rose-300 border-rose-400/40 bg-rose-500/10";
+  const tone = status === "Questionable" ? "text-warn bg-warn/10" : "text-bad bg-bad/10";
   const short: Record<string, string> = { Questionable: "Q", Doubtful: "D", Out: "O", IR: "IR", PUP: "PUP", Sus: "SUS", NA: "NA" };
   return (
-    <span title={status} className={`ml-1.5 rounded border px-1 font-mono text-[10px] ${tone}`}>
+    <span title={status} className={`ml-1.5 inline-block rounded px-1 py-[2px] align-middle text-[10px] font-semibold leading-none ${tone}`}>
       {short[status] ?? status}
     </span>
   );
 }
 
 export function Meter({ value, max = 1, tone = "cyan" }: { value: number | null; max?: number; tone?: "cyan" | "violet" | "lime" }) {
-  if (value == null) return <span className="text-slate-600">-</span>;
+  if (value == null) return <span className="text-faint">-</span>;
   const pct = Math.max(0, Math.min(100, (value / max) * 100));
-  const color = { cyan: "bg-cyan-400", violet: "bg-fuchsia-400", lime: "bg-lime-400" }[tone];
+  const color = { cyan: "bg-accent", violet: "bg-purple", lime: "bg-good" }[tone];
   return (
     <div className="flex items-center gap-2">
       <div className="h-1.5 w-14 overflow-hidden rounded-full bg-track">
         <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
       </div>
-      <span className="font-mono text-xs text-slate-300">{Math.round(value * 100)}%</span>
+      <span className="font-mono text-xs text-ink2">{Math.round(value * 100)}%</span>
     </div>
   );
 }
 
 export function RankChip({ rank, of = 32 }: { rank: number | null | undefined; of?: number }) {
-  if (!rank) return <span className="text-slate-600">-</span>;
+  if (!rank) return <span className="text-faint">-</span>;
   // High rank number = generous defense = good matchup.
   const good = rank > of * 0.66;
   const bad = rank <= of * 0.33;
-  const tone = good ? "text-lime-300 border-lime-400/40" : bad ? "text-rose-300 border-rose-400/40" : "text-slate-300 border-white/15";
-  return <span className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${tone}`}>{rank}</span>;
+  const tone = good ? "text-good bg-good/10" : bad ? "text-bad bg-bad/10" : "text-ink2 bg-track";
+  return <span className={`inline-block min-w-[22px] rounded px-1.5 py-[3px] text-center font-mono text-[10px] font-semibold leading-none ${tone}`}>{rank}</span>;
 }
 
 export function Delta({ value, suffix = "" }: { value: number; suffix?: string }) {
-  const tone = value > 0.5 ? "text-lime-300" : value < -0.5 ? "text-rose-300" : "text-slate-300";
+  const tone = value > 0.5 ? "text-good" : value < -0.5 ? "text-bad" : "text-ink2";
   return (
     <span className={`font-mono ${tone}`}>
       {value > 0 ? "+" : ""}
@@ -114,16 +112,13 @@ export function Delta({ value, suffix = "" }: { value: number; suffix?: string }
 }
 
 export function Empty({ children }: { children: React.ReactNode }) {
-  return <div className="py-10 text-center text-sm text-slate-400">{children}</div>;
+  return <div className="py-10 text-center text-sm text-muted">{children}</div>;
 }
 
 export function Spinner({ label }: { label?: string }) {
   return (
-    <div className="flex items-center gap-3 text-sm text-cyan-200">
-      <span className="relative flex h-3 w-3">
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-400 opacity-60" />
-        <span className="relative inline-flex h-3 w-3 rounded-full bg-cyan-400" />
-      </span>
+    <div className="flex items-center gap-2.5 text-sm text-muted">
+      <span className="h-4 w-4 animate-spin rounded-full border-2 border-track border-t-accent" />
       {label}
     </div>
   );
@@ -166,7 +161,7 @@ export function ThemeToggle({ className = "", label = false }: { className?: str
   const flip = () => {
     const next = theme === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = next;
-    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", next === "dark" ? "#0e1014" : "#f4f5f8");
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", next === "dark" ? "#0b0d10" : "#f5f6f8");
     try {
       localStorage.setItem("war-room:theme", next);
     } catch {
@@ -180,7 +175,7 @@ export function ThemeToggle({ className = "", label = false }: { className?: str
       aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
       className={className}
     >
-      <span aria-hidden>{theme === "dark" ? "☀" : "☾"}</span>
+      <span aria-hidden>{theme === "dark" ? <IconSun size={18} /> : <IconMoon size={18} />}</span>
       {label && <span>{theme === "dark" ? "Light mode" : "Dark mode"}</span>}
     </button>
   );

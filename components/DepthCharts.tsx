@@ -8,6 +8,7 @@ import { useMemo, useState } from "react";
 import type { LeagueModel, PlayerView } from "@/lib/model";
 import { usePlayerDrawer } from "./PlayerDrawer";
 import { InjuryTag, Panel } from "./ui";
+import { IconCheck } from "./icons";
 
 const TEAM_NAMES: Record<string, string> = {
   ARI: "Arizona Cardinals", ATL: "Atlanta Falcons", BAL: "Baltimore Ravens", BUF: "Buffalo Bills", CAR: "Carolina Panthers",
@@ -31,14 +32,14 @@ type Status = "mine" | "taken" | "available";
 
 const STATUS_STYLE: Record<Status, { row: string; chip: string; label: string }> = {
   mine: {
-    row: "border-l-2 border-cyan-300 bg-cyan-400/15 text-cyan-50",
-    chip: "border-cyan-300/60 bg-cyan-400/15 text-cyan-100",
+    row: "border-l-2 border-accent bg-accenttint text-accentstrong",
+    chip: "border-accent/60 bg-accenttint text-accentstrong",
     label: "Your roster",
   },
-  taken: { row: "border-l-2 border-transparent text-slate-300", chip: "border-white/20 bg-white/5 text-slate-200", label: "Taken" },
+  taken: { row: "border-l-2 border-transparent text-ink2", chip: "border-linestrong bg-hover text-ink", label: "Taken" },
   available: {
-    row: "border-l-2 border-lime-300/70 bg-lime-400/10 text-lime-100",
-    chip: "border-lime-300/50 bg-lime-400/10 text-lime-200",
+    row: "border-l-2 border-good/70 bg-good/10 text-good",
+    chip: "border-good/50 bg-good/10 text-good",
     label: "Available",
   },
 };
@@ -118,16 +119,16 @@ export default function DepthCharts({ model, myId }: { model: LeagueModel; myId:
   return (
     <div className="space-y-6">
       <Panel
-        title={`Depth charts · Week ${model.week}`}
+        title={`All 32 teams · Week ${model.week}`}
         corners
       >
         <div className="flex flex-wrap items-center gap-3">
           <select className="input w-full sm:w-64" value={team} onChange={(e) => setTeam(e.target.value)}>
-            <option value="ALL" className="bg-slate-900">
+            <option value="ALL" className="bg-card">
               All 32 teams
             </option>
             {teams.map((t) => (
-              <option key={t} value={t} className="bg-slate-900">
+              <option key={t} value={t} className="bg-card">
                 {TEAM_NAMES[t]}
               </option>
             ))}
@@ -140,18 +141,18 @@ export default function DepthCharts({ model, myId }: { model: LeagueModel; myId:
                 onClick={() => setShow({ ...show, [k]: !show[k] })}
                 aria-pressed={show[k]}
                 className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition ${
-                  show[k] ? STATUS_STYLE[k].chip : "border-white/10 text-slate-500 line-through"
+                  show[k] ? STATUS_STYLE[k].chip : "border-line text-muted line-through"
                 }`}
               >
-                <span className={`grid h-3.5 w-3.5 place-items-center rounded-sm border ${show[k] ? "border-current" : "border-slate-600"}`}>
-                  {show[k] ? "✓" : ""}
+                <span className={`grid h-3.5 w-3.5 place-items-center rounded-sm border ${show[k] ? "border-current" : "border-linestrong"}`}>
+                  {show[k] ? <IconCheck size={11} strokeWidth={3} /> : null}
                 </span>
                 {STATUS_STYLE[k].label}
               </button>
             ))}
           </div>
         </div>
-        <p className="mt-3 text-xs text-slate-500">
+        <p className="mt-3 text-xs text-muted">
           Ordered by who&apos;s expected to produce this week:{" "}
           {weeklyCurrent
             ? `FantasyPros expert ranks for week ${model.week}`
@@ -161,7 +162,7 @@ export default function DepthCharts({ model, myId }: { model: LeagueModel; myId:
         </p>
       </Panel>
 
-      {!shownTeams.length && <p className="text-center text-sm text-slate-500">No team or player matches that search.</p>}
+      {!shownTeams.length && <p className="text-center text-sm text-muted">No team or player matches that search.</p>}
 
       <div className="space-y-4">
         {shownTeams.map((t) => {
@@ -170,26 +171,26 @@ export default function DepthCharts({ model, myId }: { model: LeagueModel; myId:
           const bye = model.schedule.byes[t];
           return (
             <section key={t} className="panel overflow-hidden">
-              <header className="flex items-center gap-3 border-b border-cyan-400/10 px-4 py-3">
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-cyan-300/40 bg-cyan-400/10 font-display text-[11px] font-bold text-cyan-100">
+              <header className="flex items-center gap-3 border-b border-accent/10 px-4 py-3">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-accent/40 bg-accenttint font-display text-[11px] font-semibold text-accentstrong">
                   {t}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate font-display text-sm font-bold text-slate-100">{TEAM_NAMES[t]}</div>
-                  <div className="text-[11px] text-slate-500">
+                  <div className="truncate font-display text-sm font-semibold text-ink">{TEAM_NAMES[t]}</div>
+                  <div className="text-[11px] text-muted">
                     {g ? `Week ${model.week}: ${g.home ? "vs" : "@"} ${g.opp}` : `Bye in week ${model.week}`}
                     {bye ? ` · bye week ${bye}` : ""}
                   </div>
                 </div>
               </header>
-              <div className="grid grid-cols-2 gap-px bg-white/5 sm:grid-cols-3 lg:grid-cols-5">
+              <div className="grid grid-cols-2 gap-px bg-hover sm:grid-cols-3 lg:grid-cols-5">
                 {COLS.map((c) => {
                   const list = (pos?.get(c.pos) ?? []).filter((x) => show[x.status]);
                   return (
                     <div key={c.pos} className="min-w-0 bg-card p-2.5">
                       <div className="hud-title mb-1.5 !text-[10px]">{c.label}</div>
                       {!list.length ? (
-                        <div className="px-2 py-1 text-xs text-slate-600">-</div>
+                        <div className="px-2 py-1 text-xs text-faint">-</div>
                       ) : (
                         <ul className="space-y-1">
                           {list.map(({ v, rank, status }) => (
@@ -199,7 +200,7 @@ export default function DepthCharts({ model, myId }: { model: LeagueModel; myId:
                                 title={status === "taken" ? `On ${model.ownerName(v.p.id)}` : STATUS_STYLE[status].label}
                                 className={`flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition hover:brightness-125 ${STATUS_STYLE[status].row}`}
                               >
-                                <span className="w-6 shrink-0 text-right font-mono text-[11px] text-slate-400">{rank ?? "-"}</span>
+                                <span className="w-6 shrink-0 text-right font-mono text-[11px] text-muted">{rank ?? "-"}</span>
                                 <span className="min-w-0 flex-1 truncate">{v.p.name}</span>
                                 <InjuryTag status={v.p.injury} />
                               </button>

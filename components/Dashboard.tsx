@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import type { LeagueModel, PlayerView } from "@/lib/model";
 import { Delta, InjuryTag, Meter, Panel, PosTag, RankChip, Stat } from "./ui";
 import { PlayerName, usePlayerDrawer } from "./PlayerDrawer";
+import { IconAlert, IconChevronRight, IconInfo, IconSparkles, IconSwitch, IconTrendUp, IconUserPlus } from "./icons";
 
 const POS_ORDER: Record<string, number> = {
   QB: 0,
@@ -138,13 +139,13 @@ export default function Dashboard({
 
       {todo.length > 0 && (
         <Panel title={`Week ${model.week} to-do`}>
-          <ul className="-my-1 divide-y divide-white/5">
+          <ul className="-my-1 divide-y divide-linesoft">
             {todo.map((t, i) => {
-              const dot = {
-                rose: "bg-rose-400",
-                amber: "bg-amber-300",
-                lime: "bg-lime-300",
-                cyan: "bg-cyan-300",
+              const chip = {
+                rose: { cls: "bg-bad/10 text-bad", Icon: IconAlert },
+                amber: { cls: "bg-warn/10 text-warn", Icon: IconInfo },
+                lime: { cls: "bg-good/10 text-good", Icon: IconTrendUp },
+                cyan: { cls: "bg-accenttint text-accent", Icon: IconSparkles },
               }[t.tone];
               const act =
                 t.tab && go
@@ -158,13 +159,13 @@ export default function Dashboard({
                     type="button"
                     disabled={!act}
                     onClick={act}
-                    className="flex w-full items-start gap-3 py-2 text-left text-sm text-slate-200 enabled:hover:text-cyan-100"
+                    className="group flex w-full items-start gap-3 py-2.5 text-left text-sm text-ink"
                   >
-                    <span
-                      className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot}`}
-                    />
-                    <span className="min-w-0 flex-1">{t.text}</span>
-                    {act && <span className="shrink-0 text-slate-500">›</span>}
+                    <span className={`-mt-[3px] grid h-7 w-7 shrink-0 place-items-center rounded-md ${chip.cls}`}>
+                      <chip.Icon size={15} strokeWidth={2} />
+                    </span>
+                    <span className="min-w-0 flex-1 leading-snug group-enabled:group-hover:text-accentstrong">{t.text}</span>
+                    {act && <IconChevronRight size={16} className="mt-0.5 shrink-0 text-faint group-hover:text-accent" />}
                   </button>
                 </li>
               );
@@ -176,7 +177,7 @@ export default function Dashboard({
       <Panel
         title="Weekly outlook to the title"
         right={
-          <span className="hidden text-[11px] text-slate-500 sm:inline">
+          <span className="hidden text-[11px] text-muted sm:inline">
             Tap a week
           </span>
         }
@@ -194,23 +195,21 @@ export default function Dashboard({
                 className="group flex h-full flex-1 flex-col items-center gap-1"
                 aria-label={`Week ${x.week}: ${x.total.toFixed(1)} points`}
               >
-                <span className="hidden font-mono text-[10px] text-slate-400 sm:block">
+                <span className="hidden font-mono text-[10px] text-muted sm:block">
                   {x.total.toFixed(0)}
                 </span>
                 <div className="flex w-full flex-1 items-end">
                   <div
-                    className={`w-full rounded-t transition ${
-                      playoff
-                        ? "bg-fuchsia-400/80"
-                        : "bg-cyan-400/70"
-                    } ${on ? "ring-2 ring-white/70" : "group-hover:brightness-125"}`}
+                    className={`w-full rounded-t-[3px] transition ${
+                      playoff ? "bg-purple" : "bg-accent"
+                    } ${on ? "opacity-100" : "opacity-50 group-hover:opacity-80"}`}
                     style={{
                       height: `${Math.max(8, ((x.total - floor) / (hi - floor)) * 100)}%`,
                     }}
                   />
                 </div>
                 <span
-                  className={`font-mono text-[10px] ${problem ? "text-amber-300" : "text-slate-500"} ${on ? "font-bold" : ""}`}
+                  className={`font-mono text-[10px] ${problem ? "text-warn" : on ? "text-ink" : "text-muted"} ${on ? "font-semibold" : ""}`}
                 >
                   {x.week}
                 </span>
@@ -219,26 +218,26 @@ export default function Dashboard({
           })}
         </div>
         {picked && (
-          <div className="mt-3 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm">
-            <span className="font-display font-bold text-slate-100">
+          <div className="mt-3 rounded-lg border border-line bg-sunken px-3 py-2 text-sm">
+            <span className="font-display font-semibold text-ink">
               Week {picked.week}
             </span>
-            <span className="ml-2 font-mono text-cyan-200">
+            <span className="ml-2 font-mono text-accentstrong">
               {picked.total.toFixed(1)} pts
             </span>
             {picked.week >= model.playoffStart && (
-              <span className="ml-2 text-xs text-fuchsia-300">playoffs</span>
+              <span className="ml-2 text-xs text-purple">playoffs</span>
             )}
-            <div className="mt-1 text-xs text-slate-400">
+            <div className="mt-1 text-xs text-muted">
               {picked.missing.length || picked.weak.length ? (
                 <>
                   {picked.missing.length > 0 && (
-                    <span className="text-amber-200">
+                    <span className="text-warn">
                       Missing: {picked.missing.join(", ")}.{" "}
                     </span>
                   )}
                   {picked.weak.length > 0 && (
-                    <span className="text-rose-300">
+                    <span className="text-bad">
                       Weak or empty slot: {picked.weak.join(", ")}.
                     </span>
                   )}
@@ -249,13 +248,13 @@ export default function Dashboard({
             </div>
           </div>
         )}
-        <p className="mt-2 text-xs text-slate-500">
+        <p className="mt-2 text-xs text-muted">
           Amber weeks have starters on bye or hurt. Purple bars are playoff weeks.
         </p>
       </Panel>
 
       <Panel title="Roster intel" corners>
-        <div className="-mx-4 overflow-x-auto">
+        <div className="-mx-4 sm:-mx-5 overflow-x-auto">
           <table className="tbl tbl-sticky">
             <thead>
               <tr>
@@ -293,23 +292,23 @@ export default function Dashboard({
                           v={v}
                           className="max-w-[130px] sm:max-w-none"
                         />
-                        <span className="hidden text-xs text-slate-500 sm:inline">
+                        <span className="hidden text-xs text-muted sm:inline">
                           {v.p.team}
                         </span>
                         <InjuryTag status={v.p.injury} />
                         {starterIds.has(v.p.id) && (
-                          <span className="hidden text-[10px] text-cyan-300/70 sm:inline">
-                            START
+                          <span className="hidden rounded bg-accenttint px-1.5 py-[2px] text-[10px] font-semibold text-accentstrong sm:inline">
+                            Starter
                           </span>
                         )}
                       </div>
                     </td>
-                    <td className="mhide font-mono text-slate-400">
+                    <td className="mhide font-mono text-muted">
                       {v.bye ?? "-"}
                     </td>
                     <td className="mhide font-mono">{v.ppg.toFixed(1)}</td>
                     <td className="font-mono">{v.last3.toFixed(1)}</td>
-                    <td className="font-mono text-cyan-200">
+                    <td className="font-mono text-accentstrong">
                       {model.gameFor(v.p.team, model.week) ? model.projection(v.p.id).toFixed(1) : "-"}
                     </td>
                     <td>
@@ -328,13 +327,13 @@ export default function Dashboard({
                           <RankChip rank={d?.rank} />
                         </span>
                       ) : (
-                        <span className="text-xs text-amber-300">BYE</span>
+                        <span className="text-xs text-warn">BYE</span>
                       )}
                     </td>
                     <td className="mhide">
                       <Delta value={v.vorp} />
                     </td>
-                    <td className="font-mono font-semibold text-slate-100">
+                    <td className="font-mono font-semibold text-ink">
                       {v.rosPoints.toFixed(0)}
                     </td>
                   </tr>
@@ -343,7 +342,7 @@ export default function Dashboard({
             </tbody>
           </table>
         </div>
-        <p className="mt-3 text-xs text-slate-500">
+        <p className="mt-3 text-xs text-muted">
           Tap a name for the full player card (usage, practice report, team
           environment, news). Opponent chip: rank vs that position (1 =
           toughest, 32 = easiest). Faded rows are bench.
@@ -355,15 +354,15 @@ export default function Dashboard({
           title={odds ? "Standings and playoff odds" : "Standings"}
           right={
             odds ? (
-              <span className="hidden text-[11px] text-slate-500 sm:inline">
+              <span className="hidden text-[11px] text-muted sm:inline">
                 Simulated {(4000).toLocaleString()}x
               </span>
             ) : undefined
           }
         >
-          <ul className="-my-1 divide-y divide-white/5">
+          <ul className="-my-1 divide-y divide-linesoft">
             {odds && (
-              <li className="flex items-center gap-3 px-1 pb-1.5 font-display text-[10px] uppercase tracking-wider text-cyan-300/70">
+              <li className="flex items-center gap-3 px-1 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.04em] text-muted">
                 <span className="w-5" />
                 <span className="flex-1">Team</span>
                 <span className="w-10 text-right">W-L</span>
@@ -377,31 +376,31 @@ export default function Dashboard({
               const tone = !o
                 ? ""
                 : o.playoffPct >= 70
-                  ? "text-lime-300"
+                  ? "text-good"
                   : o.playoffPct <= 25
-                    ? "text-rose-300"
-                    : "text-slate-200";
+                    ? "text-bad"
+                    : "text-ink";
               return (
                 <li
                   key={t.rosterId}
-                  className={`flex items-center gap-3 rounded px-1 py-1.5 text-sm ${t.rosterId === myId ? "bg-cyan-400/10" : ""}`}
+                  className={`flex items-center gap-3 rounded px-1 py-1.5 text-sm ${t.rosterId === myId ? "bg-accenttint" : ""}`}
                 >
-                  <span className="w-5 text-right font-mono text-xs text-slate-500">
+                  <span className="w-5 text-right font-mono text-xs text-muted">
                     {i + 1}
                   </span>
                   <span className="min-w-0 flex-1 truncate">
-                    <span className="font-medium text-slate-100">
+                    <span className="font-medium text-ink">
                       {t.teamName}
                     </span>
-                    <span className="ml-2 hidden text-xs text-slate-500 lg:inline">
+                    <span className="ml-2 hidden text-xs text-muted lg:inline">
                       {t.ownerName}
                     </span>
                   </span>
-                  <span className="w-10 text-right font-mono text-slate-200">
+                  <span className="w-10 text-right font-mono text-ink">
                     {t.wins}-{t.losses}
                   </span>
                   <span
-                    className={`${odds ? "hidden sm:inline" : ""} w-14 text-right font-mono text-slate-400`}
+                    className={`${odds ? "hidden sm:inline" : ""} w-14 text-right font-mono text-muted`}
                   >
                     {t.pf.toFixed(1)}
                   </span>
@@ -415,7 +414,7 @@ export default function Dashboard({
                       >
                         {o.playoffPct}%
                       </span>
-                      <span className="w-11 text-right font-mono text-fuchsia-300">
+                      <span className="w-11 text-right font-mono text-purple">
                         {o.titlePct}%
                       </span>
                     </>
@@ -425,7 +424,7 @@ export default function Dashboard({
             })}
           </ul>
           {odds && (
-            <p className="mt-3 text-xs text-slate-500">
+            <p className="mt-3 text-xs text-muted">
               Plays out every remaining game on your league&apos;s schedule with
               each team&apos;s projected lineup, then the playoff bracket.
               Tiebreak: points for.
@@ -439,7 +438,7 @@ export default function Dashboard({
             title="League wire"
             right={
               moves.length ? (
-                <span className="text-[11px] text-slate-500">
+                <span className="text-[11px] text-muted">
                   Last {moves.length} moves
                 </span>
               ) : undefined
@@ -448,32 +447,28 @@ export default function Dashboard({
             bodyClassName="min-h-0 flex-1 lg:overflow-y-auto"
           >
             {moves.length ? (
-              <ul className="-my-1 divide-y divide-white/5">
+              <ul className="-my-1 divide-y divide-linesoft">
                 {moves.map((mv, i) => (
                   <li key={i} className="flex items-start gap-3 py-1.5 text-sm">
                     <span
-                      className={`mt-0.5 w-5 shrink-0 text-center ${mv.type === "trade" ? "text-fuchsia-300" : mv.type === "waiver" ? "text-cyan-300" : "text-slate-400"}`}
+                      className={`mt-0.5 grid w-5 shrink-0 place-items-center ${mv.type === "trade" ? "text-purple" : mv.type === "waiver" ? "text-accentstrong" : "text-muted"}`}
                       title={mv.type}
                     >
-                      {mv.type === "trade"
-                        ? "⇄"
-                        : mv.type === "waiver"
-                          ? "⊕"
-                          : "+"}
+                      {mv.type === "trade" ? <IconSwitch size={16} /> : <IconUserPlus size={16} />}
                     </span>
                     <span
-                      className={`min-w-0 flex-1 ${mv.teams.includes(myId) ? "text-cyan-100" : "text-slate-300"}`}
+                      className={`min-w-0 flex-1 ${mv.teams.includes(myId) ? "text-accentstrong" : "text-ink2"}`}
                     >
                       {mv.text}
                     </span>
-                    <span className="shrink-0 font-mono text-[11px] text-slate-500">
+                    <span className="shrink-0 font-mono text-[11px] text-muted">
                       W{mv.week}
                     </span>
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="py-6 text-center text-sm text-slate-500">
+              <p className="py-6 text-center text-sm text-muted">
                 No adds, drops or trades yet.
               </p>
             )}
@@ -482,7 +477,7 @@ export default function Dashboard({
       </div>
 
       <Panel title="Trade market: every team's needs">
-        <div className="-mx-4 overflow-x-auto">
+        <div className="-mx-4 sm:-mx-5 overflow-x-auto">
           <table className="tbl">
             <thead>
               <tr>
@@ -499,9 +494,9 @@ export default function Dashboard({
               {needs.map((n) => (
                 <tr
                   key={n.team.rosterId}
-                  className={n.team.rosterId === myId ? "bg-cyan-400/10" : ""}
+                  className={n.team.rosterId === myId ? "bg-accenttint" : ""}
                 >
-                  <td className="font-medium text-slate-100">
+                  <td className="font-medium text-ink">
                     {n.team.teamName}
                   </td>
                   {(["QB", "RB", "WR", "TE"] as const).map((p) => (
@@ -509,8 +504,8 @@ export default function Dashboard({
                       <StrengthCell rank={n.ranks[p]} of={model.teams.length} pts={n.strength[p]} />
                     </td>
                   ))}
-                  <td className="text-rose-300">{n.needs.join(", ") || "-"}</td>
-                  <td className="text-lime-300">
+                  <td className="text-bad">{n.needs.join(", ") || "-"}</td>
+                  <td className="text-good">
                     {n.surplus.join(", ") || "-"}
                   </td>
                 </tr>
@@ -518,7 +513,7 @@ export default function Dashboard({
             </tbody>
           </table>
         </div>
-        <p className="mt-3 text-xs text-slate-500">
+        <p className="mt-3 text-xs text-muted">
           Rank by position (1 = strongest) with that group&apos;s rest-of-season points per week in grey. Each group counts the starters that spot
           needs (QB1, RB1-2, WR1-2, TE1) plus the next backups at partial weight, since flex spots, byes and injuries put depth on the field.
           Player values blend season-long usage and scoring with FantasyPros rest-of-season rankings and the trade market, and players on IR count
@@ -532,14 +527,14 @@ export default function Dashboard({
 function StrengthCell({ rank, of, pts }: { rank: number; of: number; pts?: number }) {
   const tone =
     rank <= of / 3
-      ? "text-lime-300"
+      ? "text-good"
       : rank > (2 * of) / 3
-        ? "text-rose-300"
-        : "text-slate-300";
+        ? "text-bad"
+        : "text-ink2";
   return (
     <span className="whitespace-nowrap">
       <span className={`font-mono ${tone}`}>{rank}</span>
-      {pts != null && <span className="ml-1.5 font-mono text-[10px] text-slate-500">{pts.toFixed(0)}</span>}
+      {pts != null && <span className="ml-1.5 font-mono text-[10px] text-muted">{pts.toFixed(0)}</span>}
     </span>
   );
 }

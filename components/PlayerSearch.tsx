@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { LeagueModel } from "@/lib/model";
 import { usePlayerDrawer } from "./PlayerDrawer";
 import { InjuryTag, PosTag } from "./ui";
+import { IconSearch } from "./icons";
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, "");
 
@@ -51,22 +52,23 @@ export default function PlayerSearch({ model, compact = false }: { model: League
   if (compact && !expanded)
     return (
       <button
-        className="grid h-9 w-9 place-items-center rounded-lg text-lg text-slate-300 active:bg-white/10"
+        className="icon-btn"
         aria-label="Search players"
         onClick={() => {
           setExpanded(true);
           setTimeout(() => input.current?.focus(), 0);
         }}
       >
-        ⌕
+        <IconSearch size={17} />
       </button>
     );
 
   return (
-    <div ref={box} className={compact ? "absolute inset-x-0 top-full z-30 border-b border-line bg-card px-4 py-2" : "relative w-56 lg:w-72"}>
+    <div ref={box} className={compact ? "absolute inset-x-0 top-full z-30 border-b border-line bg-card px-4 py-2" : "relative w-full max-w-[420px]"}>
+      <IconSearch size={16} className={`pointer-events-none absolute z-10 text-faint ${compact ? "left-[30px] top-[19px]" : "left-3.5 top-1/2 -translate-y-1/2"}`} />
       <input
         ref={input}
-        className="input py-1.5 text-sm"
+        className="input rounded-full border-line bg-sunken py-2 pl-10 text-sm focus:bg-card"
         placeholder="Search any player"
         value={q}
         onChange={(e) => {
@@ -84,19 +86,19 @@ export default function PlayerSearch({ model, compact = false }: { model: League
         }}
       />
       {show && results.length > 0 && (
-        <ul className={`${compact ? "mt-2" : "absolute left-0 right-0 top-full mt-1"} z-40 overflow-hidden rounded-lg border border-line bg-card shadow-xl`}>
+        <ul className={`${compact ? "mt-2" : "absolute left-0 right-0 top-full mt-1.5"} z-40 overflow-hidden rounded-xl border border-line bg-card py-1 shadow-xl`}>
           {results.map(({ v }) => (
             <li key={v.p.id}>
               <button
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-cyan-400/10"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-hover"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => pick(v.p.id)}
               >
                 <PosTag pos={v.p.pos} />
-                <span className="truncate text-slate-100">{v.p.name}</span>
-                <span className="text-xs text-slate-500">{v.p.team ?? "FA"}</span>
+                <span className="truncate text-ink">{v.p.name}</span>
+                <span className="text-xs text-muted">{v.p.team ?? "FA"}</span>
                 <InjuryTag status={v.p.injury} />
-                <span className="ml-auto truncate text-[11px] text-slate-500">{model.ownerName(v.p.id)}</span>
+                <span className="ml-auto truncate text-[11px] text-muted">{model.ownerName(v.p.id)}</span>
               </button>
             </li>
           ))}

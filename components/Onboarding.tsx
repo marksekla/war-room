@@ -42,10 +42,10 @@ export default function Onboarding({ onOpenSettings }: { onOpenSettings: () => v
       <div className="w-full max-w-xl">
         <div className="mb-10 flex flex-col items-center text-center">
           <Brand onLight />
-          <h1 className="mt-8 font-display text-3xl font-black tracking-wider text-slate-100 md:text-4xl">
-            Welcome to the <span className="whitespace-nowrap neon-text">War Room</span>
+          <h1 className="mt-8 font-display text-3xl font-semibold text-ink md:text-4xl">
+            Welcome to the <span className="whitespace-nowrap text-accent">War Room</span>
           </h1>
-          <p className="mt-3 max-w-md text-sm text-slate-400">
+          <p className="mt-3 max-w-md text-sm text-muted">
             Sync your Sleeper league. Get trade simulations, waiver targets, lineup calls and an AI agent that knows your roster, your scoring and the news.
           </p>
         </div>
@@ -73,10 +73,10 @@ export default function Onboarding({ onOpenSettings }: { onOpenSettings: () => v
                 <button
                   key={l.id}
                   onClick={() => pick(l.id)}
-                  className="flex w-full items-center justify-between rounded-lg border border-cyan-400/20 bg-cyan-400/5 px-4 py-3 text-left transition hover:border-cyan-300/60 hover:shadow-glow"
+                  className="flex w-full items-center justify-between rounded-lg border border-line bg-card px-4 py-3 text-left transition hover:border-accent/50 hover:bg-hover"
                 >
-                  <span className="font-medium text-slate-100">{l.name}</span>
-                  <span className="font-mono text-xs text-slate-400">
+                  <span className="font-medium text-ink">{l.name}</span>
+                  <span className="font-mono text-xs text-muted">
                     {l.teams} teams · {l.season}
                   </span>
                 </button>
@@ -84,8 +84,8 @@ export default function Onboarding({ onOpenSettings }: { onOpenSettings: () => v
             </div>
           )}
 
-          <div className="flex items-center gap-3 text-[10px] uppercase tracking-widest text-slate-500">
-            <div className="h-px flex-1 bg-white/10" /> or league ID <div className="h-px flex-1 bg-white/10" />
+          <div className="flex items-center gap-3 text-[10px] uppercase tracking-widest text-muted">
+            <div className="h-px flex-1 bg-track" /> or league ID <div className="h-px flex-1 bg-track" />
           </div>
 
           <div className="flex gap-2">
@@ -100,12 +100,12 @@ export default function Onboarding({ onOpenSettings }: { onOpenSettings: () => v
             </button>
           </div>
 
-          {err && <p className="text-sm text-rose-300">{err}</p>}
+          {err && <p className="text-sm text-bad">{err}</p>}
         </div>
 
-        <p className="mt-6 text-center text-xs text-slate-500">
+        <p className="mt-6 text-center text-xs text-muted">
           The AI agent needs your own AI key (Claude, GPT, or a free Gemini key).{" "}
-          <button className="text-cyan-300 underline" onClick={onOpenSettings}>
+          <button className="text-accentstrong underline" onClick={onOpenSettings}>
             Add it in Settings
           </button>
           . Keys stay in your browser.

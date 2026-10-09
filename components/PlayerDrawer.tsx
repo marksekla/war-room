@@ -9,6 +9,7 @@ import type { LeagueModel, PlayerView } from "@/lib/model";
 import { fetchNews, fetchWeather, weatherNote } from "@/lib/live";
 import type { NewsItem, NflUsage, Weather } from "@/lib/types";
 import { ChanceRing, InjuryTag, PosTag, RankChip } from "./ui";
+import { IconSparkles, IconX } from "./icons";
 
 interface DrawerCtx {
   open: (id: string) => void;
@@ -68,7 +69,7 @@ export function PlayerName({ v, className = "" }: { v: PlayerView; className?: s
         e.stopPropagation();
         open(v.p.id);
       }}
-      className={`truncate text-left font-medium text-slate-100 underline-offset-4 hover:text-cyan-200 hover:underline ${className}`}
+      className={`truncate text-left font-medium text-ink underline-offset-4 hover:text-accentstrong hover:underline ${className}`}
     >
       {v.p.name}
     </button>
@@ -158,18 +159,18 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
         <div className="sticky top-0 z-10 -mx-5 mb-4 flex items-start gap-3 border-b border-linesoft bg-card px-5 pb-3 pt-[max(1rem,env(safe-area-inset-top))]">
           <PosTag pos={v.p.pos} />
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1 font-display text-lg font-bold text-slate-100">
+            <div className="flex items-center gap-1 font-display text-lg font-semibold text-ink">
               <span className="truncate">{v.p.name}</span>
               <InjuryTag status={v.p.injury} />
             </div>
-            <div className="text-xs text-slate-400">
+            <div className="text-xs text-muted">
               {v.p.team ?? "FA"}
               {v.p.age ? ` · ${v.p.age} yrs` : ""}
               {v.bye ? ` · bye ${v.bye}` : ""} · {owner}
             </div>
           </div>
-          <button className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-300 hover:bg-white/10" onClick={onClose} aria-label="Close">
-            ✕
+          <button className="icon-btn" onClick={onClose} aria-label="Close">
+            <IconX size={17} />
           </button>
         </div>
 
@@ -182,7 +183,7 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
               <span>
                 {v.rosPoints.toFixed(0)}
                 {model.rosRank(v.p.id) != null && (
-                  <span className="ml-1.5 text-xs font-normal text-cyan-300/80">
+                  <span className="ml-1.5 text-xs font-normal text-accentstrong/80">
                     {v.p.pos}
                     {model.rosRank(v.p.id)}
                   </span>
@@ -194,7 +195,7 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
                 <span>
                   Wk {model.week} proj {model.projection(v.p.id).toFixed(1)}
                   {v.projSleeper != null && (
-                    <span className="block text-[10px] text-slate-500">Sleeper {v.projSleeper.toFixed(1)}</span>
+                    <span className="block text-[10px] text-muted">Sleeper {v.projSleeper.toFixed(1)}</span>
                   )}
                 </span>
               ) : (
@@ -209,11 +210,11 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
               <span>
                 {v.ecrRos != null ? "FantasyPros ROS" : "Not ranked"}
                 {v.market && (
-                  <span className="block text-[10px] text-slate-500">
+                  <span className="block text-[10px] text-muted">
                     Market {v.p.pos}
                     {v.market.posRank}
                     {v.market.trend !== 0 && (
-                      <span className={v.market.trend > 0 ? "text-lime-300" : "text-rose-300"}>
+                      <span className={v.market.trend > 0 ? "text-good" : "text-bad"}>
                         {" "}
                         {v.market.trend > 0 ? "▲" : "▼"}
                         {Math.abs(v.market.trend)}
@@ -231,41 +232,41 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
           <Section title="Health and role">
             <div className="space-y-1.5 text-sm">
               {showPlay && play && (
-                <div className="flex items-start gap-3 rounded-lg border border-white/10 bg-black/30 p-2.5">
+                <div className="flex items-start gap-3 rounded-lg border border-line bg-sunken p-2.5">
                   <ChanceRing p={play.p} size={44} />
                   <div className="min-w-0 text-xs leading-snug">
-                    <div className="text-slate-200">Chance to play week {model.week}</div>
-                    <div className="mt-0.5 text-slate-400">{play.why}</div>
+                    <div className="text-ink">Chance to play week {model.week}</div>
+                    <div className="mt-0.5 text-muted">{play.why}</div>
                   </div>
                 </div>
               )}
               {model.returnWeek.get(v.p.id) != null && (
-                <div className="text-amber-200">
+                <div className="text-warn">
                   Expected back:{" "}
                   {model.returnWeek.get(v.p.id)! > 18 ? "not this season" : `Week ${model.returnWeek.get(v.p.id)}`}
                   {v.espn?.returnDate ? "" : " (estimate)"}
                 </div>
               )}
               {model.roleShift.get(v.p.id) && (
-                <div className="text-rose-300">
+                <div className="text-bad">
                   Role likely shrinks from Week {model.roleShift.get(v.p.id)!.fromWeek} when {model.roleShift.get(v.p.id)!.by} returns. His
                   projections are lowered from then.
                 </div>
               )}
               {pr && (
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-slate-400">Week {pr.w} practice</span>
+                  <span className="text-muted">Week {pr.w} practice</span>
                   <PracChip st={pr.st} />
-                  {pr.inj && <span className="text-slate-300">{pr.inj}</span>}
-                  {pr.rep && <span className="text-amber-300">· {pr.rep}</span>}
+                  {pr.inj && <span className="text-ink2">{pr.inj}</span>}
+                  {pr.rep && <span className="text-warn">· {pr.rep}</span>}
                   {pr.wks >= 3 && !/rest|not injury/i.test(pr.inj ?? "") && (
-                    <span className="rounded border border-rose-400/40 px-1.5 text-[10px] text-rose-300">ON REPORT {pr.wks} WKS</span>
+                    <span className="rounded border border-bad/40 px-1.5 text-[10px] text-bad">ON REPORT {pr.wks} WKS</span>
                   )}
                 </div>
               )}
               {v.espn && (
-                <div className="text-slate-300">
-                  <span className="text-slate-400">ESPN: </span>
+                <div className="text-ink2">
+                  <span className="text-muted">ESPN: </span>
                   {v.espn.status}
                   {v.espn.short ? ` · ${v.espn.short}` : ""}
                   {v.espn.returnDate ? ` · est. return ${new Date(v.espn.returnDate).toLocaleDateString()}` : ""}
@@ -280,7 +281,7 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
           <Section title={`Usage · nflverse through week ${model.nfl?.throughWeek ?? "?"}`}>
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-left text-[10px] uppercase tracking-wider text-slate-500">
+                <tr className="text-left text-[10px] uppercase tracking-wider text-muted">
                   <th className="pb-1 font-normal" />
                   <th className="pb-1 text-right font-normal">Season</th>
                   <th className="pb-1 text-right font-normal">Last 3</th>
@@ -288,18 +289,18 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
               </thead>
               <tbody>
                 {rows.map(([label, fn, tip]) => (
-                  <tr key={label} className="border-t border-white/5">
-                    <td className="py-1.5 text-slate-400" title={tip}>
+                  <tr key={label} className="border-t border-linesoft">
+                    <td className="py-1.5 text-muted" title={tip}>
                       {label}
                     </td>
-                    <td className="py-1.5 text-right font-mono text-slate-100">{fn(a.s!)}</td>
-                    <td className="py-1.5 text-right font-mono text-cyan-200">{a.l3 ? fn(a.l3) : "-"}</td>
+                    <td className="py-1.5 text-right font-mono text-ink">{fn(a.s!)}</td>
+                    <td className="py-1.5 text-right font-mono text-accentstrong">{a.l3 ? fn(a.l3) : "-"}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
             {luck != null && Math.abs(luck) >= 2 && (
-              <p className={`mt-2 text-xs ${luck > 0 ? "text-amber-200" : "text-lime-300"}`}>
+              <p className={`mt-2 text-xs ${luck > 0 ? "text-warn" : "text-good"}`}>
                 {luck > 0
                   ? `Scoring ${luck.toFixed(1)} PPR pts/game above his expected points. Some of that is efficiency or TD luck that may cool off.`
                   : `Scoring ${Math.abs(luck).toFixed(1)} PPR pts/game below his expected points. The opportunity is there, so a bounce-back is likely.`}
@@ -309,19 +310,19 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
             {/* Weekly bars: actual points (number on top) with the pre-game projection line. Numbers are always visible, no hover needed. */}
             {wkRows.length > 0 && (
               <div className="mt-4">
-                <div className="mb-2 flex justify-between text-[10px] uppercase tracking-wider text-slate-500">
+                <div className="mb-2 flex justify-between text-[10px] uppercase tracking-wider text-muted">
                   <span>{wkRows.length >= 8 ? "Last 8 games" : "Week by week"}</span>
                   <span>
-                    <span className="text-cyan-300">■</span> Scored <span className="ml-2 text-fuchsia-300">━</span> {hasProj ? "Projected" : "Expected (xFP)"}
+                    <span className="text-accentstrong">■</span> Scored <span className="ml-2 text-purple">━</span> {hasProj ? "Projected" : "Expected (xFP)"}
                   </span>
                 </div>
                 <div className="flex gap-1.5">
-                  <div className="flex w-9 shrink-0 flex-col justify-end text-[9px] uppercase tracking-wider text-slate-500">
+                  <div className="flex w-9 shrink-0 flex-col justify-end text-[9px] uppercase tracking-wider text-muted">
                     <span className="flex h-6 items-end pb-0.5">Pts</span>
                     <span className="h-20" />
                     <span className="mt-1 h-3.5 leading-[14px]">Wk</span>
-                    {hasProj && <span className="h-3.5 leading-[14px] text-fuchsia-300/80">Proj</span>}
-                    <span className={`h-3.5 leading-[14px] ${hasProj ? "text-slate-500" : "text-fuchsia-300/80"}`} title="Expected points from his opportunity (targets, carries, field position)">
+                    {hasProj && <span className="h-3.5 leading-[14px] text-purple/80">Proj</span>}
+                    <span className={`h-3.5 leading-[14px] ${hasProj ? "text-muted" : "text-purple/80"}`} title="Expected points from his opportunity (targets, carries, field position)">
                       xFP
                     </span>
                     <span className="h-3.5 leading-[14px]">Snap</span>
@@ -332,28 +333,28 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
                     return (
                       <div key={r.w} className="flex min-w-0 flex-1 flex-col items-center">
                         <span
-                          className={`flex h-6 items-end pb-0.5 font-mono text-[11px] font-semibold ${beat == null ? "text-slate-100" : beat >= 0 ? "text-lime-300" : "text-rose-300"}`}
+                          className={`flex h-6 items-end pb-0.5 font-mono text-[11px] font-semibold ${beat == null ? "text-ink" : beat >= 0 ? "text-good" : "text-bad"}`}
                         >
                           {r.pts != null ? r.pts.toFixed(1) : "-"}
                         </span>
                         <div className="relative flex h-20 w-full items-end">
-                          <div className="w-full rounded-t bg-cyan-400/60" style={{ height: `${(Math.max(0, r.pts ?? 0) / maxPts) * 100}%` }} />
+                          <div className="w-full rounded-t-[3px] bg-accent/70" style={{ height: `${(Math.max(0, r.pts ?? 0) / maxPts) * 100}%` }} />
                           {line != null && (
                             <div
-                              className="absolute inset-x-0 h-0.5 bg-fuchsia-400"
+                              className="absolute inset-x-0 h-0.5 bg-purple"
                               style={{ bottom: `calc(${(Math.max(0, line) / maxPts) * 100}% - 1px)` }}
                             />
                           )}
                         </div>
-                        <span className="mt-1 h-3.5 font-mono text-[10px] leading-[14px] text-slate-400">{r.w}</span>
-                        {hasProj && <span className="h-3.5 font-mono text-[10px] leading-[14px] text-fuchsia-300/90">{r.proj != null ? r.proj.toFixed(1) : "-"}</span>}
-                        <span className={`h-3.5 font-mono text-[10px] leading-[14px] ${hasProj ? "text-slate-500" : "text-fuchsia-300/90"}`}>{r.xfp != null ? r.xfp.toFixed(1) : "-"}</span>
-                        <span className="h-3.5 font-mono text-[10px] leading-[14px] text-slate-500">{r.snap != null ? `${Math.round(r.snap * 100)}%` : "-"}</span>
+                        <span className="mt-1 h-3.5 font-mono text-[10px] leading-[14px] text-muted">{r.w}</span>
+                        {hasProj && <span className="h-3.5 font-mono text-[10px] leading-[14px] text-purple/90">{r.proj != null ? r.proj.toFixed(1) : "-"}</span>}
+                        <span className={`h-3.5 font-mono text-[10px] leading-[14px] ${hasProj ? "text-muted" : "text-purple/90"}`}>{r.xfp != null ? r.xfp.toFixed(1) : "-"}</span>
+                        <span className="h-3.5 font-mono text-[10px] leading-[14px] text-muted">{r.snap != null ? `${Math.round(r.snap * 100)}%` : "-"}</span>
                       </div>
                     );
                   })}
                 </div>
-                <p className="mt-2 text-[11px] leading-snug text-slate-500">
+                <p className="mt-2 text-[11px] leading-snug text-muted">
                   {hasProj
                     ? "Projected = what he was expected to score before kickoff. xFP = what his actual usage that day is usually worth, so a low xFP means the opportunity wasn't there."
                     : "xFP = what his actual usage is usually worth (targets, carries, field position)."}
@@ -375,7 +376,7 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
           </Section>
         ) : (
           v.p.pos !== "DEF" &&
-          v.p.pos !== "K" && <p className="mt-6 text-xs text-slate-500">No advanced usage yet (no snaps this season, or data not loaded).</p>
+          v.p.pos !== "K" && <p className="mt-6 text-xs text-muted">No advanced usage yet (no snaps this season, or data not loaded).</p>
         )}
 
         {/* Team environment */}
@@ -400,15 +401,15 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
                 const g = model.gameFor(v.p.team, w);
                 const d = g ? model.dvp.get(g.opp)?.get(v.p.pos) : undefined;
                 return (
-                  <div key={w} className="rounded border border-white/10 px-2 py-1 text-center font-mono text-[11px]">
-                    <div className="text-slate-500">W{w}</div>
+                  <div key={w} className="rounded border border-line px-2 py-1 text-center font-mono text-[11px]">
+                    <div className="text-muted">W{w}</div>
                     {g ? (
-                      <div className="flex items-center gap-1 text-slate-200">
+                      <div className="flex items-center gap-1 text-ink">
                         {g.home ? "" : "@"}
                         {g.opp} <RankChip rank={d?.rank} />
                       </div>
                     ) : (
-                      <div className="text-amber-300">BYE</div>
+                      <div className="text-warn">BYE</div>
                     )}
                   </div>
                 );
@@ -416,7 +417,7 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
             </div>
             <ThisWeek model={model} v={v} />
             {wn && (
-              <p className={`mt-2 text-xs ${wn.severe ? "text-amber-300" : "text-slate-400"}`}>
+              <p className={`mt-2 text-xs ${wn.severe ? "text-warn" : "text-muted"}`}>
                 Week {model.week} forecast: {wn.label}
               </p>
             )}
@@ -426,26 +427,26 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
         {/* News */}
         {v.p.espnId && (
           <Section title="Latest news">
-            {!news && !newsErr && <p className="text-xs text-slate-500">Loading...</p>}
-            {newsErr && <p className="text-xs text-slate-500">News is unavailable right now.</p>}
-            {news && !news.length && <p className="text-xs text-slate-500">No recent news.</p>}
+            {!news && !newsErr && <p className="text-xs text-muted">Loading...</p>}
+            {newsErr && <p className="text-xs text-muted">News is unavailable right now.</p>}
+            {news && !news.length && <p className="text-xs text-muted">No recent news.</p>}
             <ul className="space-y-3">
               {news?.slice(0, 4).map((n, i) => (
                 <li key={i} className="text-sm">
-                  <div className="text-[10px] uppercase tracking-wider text-slate-500">
+                  <div className="text-[10px] uppercase tracking-wider text-muted">
                     {n.published ? new Date(n.published).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : ""}
                     {n.source ? ` · ${n.source}` : ""}
                   </div>
-                  <div className="text-slate-200">
+                  <div className="text-ink">
                     {n.url ? (
-                      <a href={n.url} target="_blank" rel="noreferrer" className="hover:text-cyan-200 hover:underline">
+                      <a href={n.url} target="_blank" rel="noreferrer" className="hover:text-accentstrong hover:underline">
                         {n.headline}
                       </a>
                     ) : (
                       n.headline
                     )}
                   </div>
-                  {n.story && n.story !== n.headline && <div className="mt-0.5 line-clamp-3 text-xs text-slate-400">{n.story}</div>}
+                  {n.story && n.story !== n.headline && <div className="mt-0.5 line-clamp-3 text-xs text-muted">{n.story}</div>}
                 </li>
               ))}
             </ul>
@@ -460,7 +461,8 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
             )
           }
         >
-          ✦ Ask the AI about {v.p.name.split(" ").slice(-1)[0]}
+          <IconSparkles size={16} />
+          Ask the AI about {v.p.name.split(" ").slice(-1)[0]}
         </button>
       </aside>
     </div>
@@ -475,11 +477,11 @@ function ThisWeek({ model, v }: { model: LeagueModel; v: PlayerView }) {
   const olOut = model.unitOut(v.p.team, "ol");
   const restGap = ctx?.rest != null && ctx.oppRest != null ? ctx.rest - ctx.oppRest : 0;
   const lines = [
-    dOut.length ? { tone: "text-lime-300", text: `${g.opp} defense missing: ${dOut.map((x) => `${x.name} (${x.pos}, ${x.status})`).join(", ")}` } : null,
-    olOut.length ? { tone: "text-rose-300", text: `${v.p.team} O-line missing: ${olOut.map((x) => `${x.name} (${x.pos}, ${x.status})`).join(", ")}` } : null,
+    dOut.length ? { tone: "text-good", text: `${g.opp} defense missing: ${dOut.map((x) => `${x.name} (${x.pos}, ${x.status})`).join(", ")}` } : null,
+    olOut.length ? { tone: "text-bad", text: `${v.p.team} O-line missing: ${olOut.map((x) => `${x.name} (${x.pos}, ${x.status})`).join(", ")}` } : null,
     ctx && (Math.abs(restGap) >= 3 || ctx.divisional || ctx.neutralSite)
       ? {
-          tone: "text-slate-400",
+          tone: "text-muted",
           text: [
             ctx.rest != null && Math.abs(restGap) >= 3 ? `${ctx.rest} days rest vs ${ctx.oppRest}` : null,
             ctx.divisional ? "divisional game" : null,
@@ -513,21 +515,21 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function Tile({ label, value, sub }: { label: string; value: React.ReactNode; sub?: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-white/10 bg-black/30 p-2.5">
-      <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
-      <div className="mt-0.5 font-display text-lg font-bold neon-text">{value}</div>
-      {sub && <div className="text-[11px] text-slate-400">{sub}</div>}
+    <div className="rounded-lg border border-line bg-sunken p-2.5">
+      <div className="text-[10px] uppercase tracking-wider text-muted">{label}</div>
+      <div className="mt-0.5 font-display text-lg font-semibold neon-text">{value}</div>
+      {sub && <div className="text-[11px] text-muted">{sub}</div>}
     </div>
   );
 }
 
 function EnvTile({ label, value, rank, tip }: { label: string; value: string; rank?: number; tip?: string }) {
   return (
-    <div className="rounded-lg border border-white/10 bg-black/30 p-2" title={tip}>
-      <div className="text-[10px] leading-tight text-slate-500">{label}</div>
-      <div className="mt-0.5 flex items-center gap-1.5 font-mono text-sm text-slate-100">
+    <div className="rounded-lg border border-line bg-sunken p-2" title={tip}>
+      <div className="text-[10px] leading-tight text-muted">{label}</div>
+      <div className="mt-0.5 flex items-center gap-1.5 font-mono text-sm text-ink">
         {value}
-        {rank != null && <span className={`text-[10px] ${rank <= 8 ? "text-lime-300" : rank >= 25 ? "text-rose-300" : "text-slate-500"}`}>#{rank}</span>}
+        {rank != null && <span className={`text-[10px] ${rank <= 8 ? "text-good" : rank >= 25 ? "text-bad" : "text-muted"}`}>#{rank}</span>}
       </div>
     </div>
   );
@@ -535,9 +537,9 @@ function EnvTile({ label, value, rank, tip }: { label: string; value: string; ra
 
 function Chip({ label, value }: { label: string; value: string }) {
   return (
-    <span className="rounded border border-white/10 bg-black/30 px-2 py-1">
-      <span className="text-slate-500">{label} </span>
-      <span className="font-mono text-slate-100">{value}</span>
+    <span className="rounded border border-line bg-sunken px-2 py-1">
+      <span className="text-muted">{label} </span>
+      <span className="font-mono text-ink">{value}</span>
     </span>
   );
 }
@@ -545,6 +547,6 @@ function Chip({ label, value }: { label: string; value: string }) {
 export function PracChip({ st }: { st: "DNP" | "LP" | "FP" | null }) {
   if (!st) return null;
   const tone =
-    st === "DNP" ? "border-rose-400/50 text-rose-300" : st === "LP" ? "border-amber-400/50 text-amber-300" : "border-lime-400/50 text-lime-300";
+    st === "DNP" ? "border-bad/50 text-bad" : st === "LP" ? "border-warn/50 text-warn" : "border-good/50 text-good";
   return <span className={`rounded border px-1 font-mono text-[10px] ${tone}`}>{st}</span>;
 }

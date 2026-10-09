@@ -5,6 +5,7 @@ import { useLeague } from "@/lib/LeagueContext";
 import type { LeagueModel } from "@/lib/model";
 import { runAgent, PROVIDERS, type ChatMessage } from "@/lib/agent/run";
 import Markdown from "./Markdown";
+import { IconChevronRight, IconSparkles } from "./icons";
 
 const SUGGESTIONS = [
   "Who are the best waiver adds for my roster this week?",
@@ -55,9 +56,12 @@ export default function Chat({
   const [live, setLive] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const scrollBox = useRef<HTMLDivElement>(null);
 
+  // Keep the newest message in view by scrolling the chat box only (not the whole page).
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
+    const box = scrollBox.current;
+    if (box && (messages.length || live.length)) box.scrollTo({ top: box.scrollHeight, behavior: "smooth" });
   }, [messages, live]);
 
   const send = async (text: string) => {
@@ -97,10 +101,9 @@ export default function Chat({
   const provider = PROVIDERS[saved.ai.provider];
 
   return (
-    <div className="flex h-[calc(100dvh-12.5rem)] flex-col md:h-[calc(100vh-11rem)]">
-      <div className="mb-3 flex flex-wrap items-center gap-3">
-        <h1 className="font-display text-xl font-semibold text-ink">AI Agent</h1>
-        <span className="rounded-full border border-fuchsia-400/30 bg-fuchsia-500/10 px-2.5 py-0.5 font-mono text-[11px] text-fuchsia-200">
+    <div className="flex h-[calc(100dvh-13.5rem)] flex-col md:h-[calc(100vh-14rem)]">
+      <div className="mb-3 flex min-h-[34px] flex-wrap items-center gap-3">
+        <span className="rounded-full border border-purple/30 bg-purple/10 px-2.5 py-0.5 font-mono text-[11px] text-purple">
           {provider.label} · {saved.ai.model || provider.defaultModel || "auto"}
         </span>
         {messages.length > 0 && (
@@ -108,13 +111,13 @@ export default function Chat({
         )}
       </div>
 
-      <div className="panel flex-1 overflow-y-auto p-4 md:p-6">
+      <div ref={scrollBox} className="panel flex-1 overflow-y-auto p-4 md:p-6">
         {messages.length === 0 && !busy && (
-          <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center text-center">
-            <div className="mb-4 grid h-16 w-16 place-items-center rounded-2xl border border-cyan-300/40 bg-cyan-400/10 shadow-glow">
-              <span className="font-display text-2xl neon-text">✦</span>
+          <div className="mx-auto flex min-h-full max-w-2xl flex-col items-center justify-center text-center">
+            <div className="mb-4 grid h-14 w-14 shrink-0 place-items-center rounded-xl bg-accenttint text-accent">
+              <IconSparkles size={26} />
             </div>
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-muted">
               Your agent has your whole league loaded: rosters, league scoring, usage, snap and first-read shares, red zone work, practice reports, team pass rates, matchups, Vegas lines, weather, market trade values and a trade simulator. It checks news before it answers.
             </p>
             {!saved.ai.apiKey && (
@@ -125,7 +128,7 @@ export default function Chat({
                 <button
                   key={s}
                   onClick={() => send(s)}
-                  className="rounded-lg border border-cyan-400/20 bg-cyan-400/5 px-4 py-3 text-left text-sm text-slate-200 transition hover:border-cyan-300/50 hover:shadow-glow"
+                  className="rounded-lg border border-line bg-card px-4 py-3 text-left text-sm text-ink transition hover:border-accent/50 hover:bg-hover"
                 >
                   {s}
                 </button>
@@ -138,33 +141,33 @@ export default function Chat({
           {messages.map((m, i) =>
             m.role === "user" ? (
               <div key={i} className="flex justify-end">
-                <div className="max-w-[85%] rounded-2xl rounded-br-sm border border-cyan-400/30 bg-cyan-400/10 px-4 py-2.5 text-sm text-cyan-50">
+                <div className="max-w-[85%] rounded-2xl rounded-br-md bg-accent px-4 py-2.5 text-sm text-[#ffffff]">
                   {m.content}
                 </div>
               </div>
             ) : (
               <div key={i} className="max-w-[95%]">
                 {m.steps && m.steps.length > 0 && (
-                  <details className="mb-2 text-xs text-slate-500">
-                    <summary className="cursor-pointer select-none hover:text-cyan-300">
+                  <details className="mb-2 text-xs text-muted">
+                    <summary className="cursor-pointer select-none hover:text-accentstrong">
                       {m.steps.length} research step{m.steps.length > 1 ? "s" : ""}
                     </summary>
                     <ul className="mt-1 space-y-0.5 pl-4">
                       {m.steps.map((s, j) => (
-                        <li key={j}>› {s}</li>
+                        <li key={j} className="flex items-start gap-1"><IconChevronRight size={13} className="mt-[3px] text-faint" /><span>{s}</span></li>
                       ))}
                     </ul>
                   </details>
                 )}
-                <div className="rounded-2xl rounded-tl-sm border border-white/10 bg-black/30 px-4 py-3">
+                <div className="rounded-2xl rounded-tl-md border border-line bg-sunken px-4 py-3">
                   <Markdown text={m.content || "(no answer returned)"} />
                   {m.sources && m.sources.length > 0 && (
-                    <div className="mt-3 border-t border-white/10 pt-2">
+                    <div className="mt-3 border-t border-line pt-2">
                       <div className="hud-title mb-1">Sources</div>
                       <ul className="space-y-0.5 text-xs">
                         {m.sources.slice(0, 10).map((s) => (
                           <li key={s.url}>
-                            <a className="text-cyan-300 hover:underline" href={s.url} target="_blank" rel="noreferrer">
+                            <a className="text-accentstrong hover:underline" href={s.url} target="_blank" rel="noreferrer">
                               {s.title}
                             </a>
                           </li>
@@ -177,16 +180,16 @@ export default function Chat({
             )
           )}
           {busy && (
-            <div className="space-y-1 font-mono text-xs text-cyan-300">
+            <div className="space-y-1 font-mono text-xs text-accentstrong">
               <div className="flex items-center gap-2">
-                <span className="h-2 w-2 animate-ping rounded-full bg-cyan-400" /> Thinking
+                <span className="h-2 w-2 animate-ping rounded-full bg-accent" /> Thinking
               </div>
               {live.map((l, i) => (
-                <div key={i} className="text-slate-400">› {l}</div>
+                <div key={i} className="flex items-start gap-1 text-muted"><IconChevronRight size={13} className="mt-[3px] text-faint" /><span>{l}</span></div>
               ))}
             </div>
           )}
-          {err && <div className="rounded-lg border border-rose-400/30 bg-rose-500/10 p-3 text-sm text-rose-200">{err}</div>}
+          {err && <div className="rounded-lg border border-bad/30 bg-bad/10 p-3 text-sm text-bad">{err}</div>}
           <div ref={endRef} />
         </div>
       </div>

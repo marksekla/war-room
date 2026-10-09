@@ -6,6 +6,7 @@ import type { Position } from "@/lib/types";
 import { useLeague } from "@/lib/LeagueContext";
 import { Delta, Empty, InjuryTag, Panel, PosTag } from "./ui";
 import { usePlayerDrawer } from "./PlayerDrawer";
+import { IconLock, IconSparkles, IconSwitch, IconUnlock } from "./icons";
 
 const POS_ORDER: Record<string, number> = { QB: 0, RB: 1, WR: 2, TE: 3, K: 4, DEF: 5 };
 
@@ -86,7 +87,7 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
           }}
         />
         <button
-          className="mb-0.5 grid h-10 w-10 shrink-0 place-items-center self-center rounded-lg border border-cyan-400/25 text-lg text-cyan-200 transition hover:bg-cyan-400/10 hover:shadow-glow sm:self-auto"
+          className="mb-0.5 grid h-10 w-10 shrink-0 place-items-center self-center rounded-lg border border-line bg-card text-ink2 transition hover:border-accent/50 hover:text-accent sm:self-auto"
           title="Swap sides"
           aria-label="Swap sides"
           onClick={() => {
@@ -97,7 +98,7 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
             setGet(give);
           }}
         >
-          <span className="rotate-90 sm:rotate-0">⇄</span>
+          <IconSwitch size={18} className="rotate-90 sm:rotate-0" />
         </button>
         <TeamSelect
           label="Trade partner"
@@ -136,12 +137,12 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
               Back to my team
             </button>
           )}
-          <div className="flex rounded-lg border border-white/10 p-0.5 font-mono text-xs" role="group" aria-label="Show points for">
+          <div className="flex rounded-lg border border-line bg-card p-0.5 text-xs font-medium" role="group" aria-label="Show points for">
             {(["ros", "week"] as const).map((k) => (
               <button
                 key={k}
                 onClick={() => setMetric(k)}
-                className={`rounded-md px-2.5 py-1 ${metric === k ? "bg-cyan-400/20 text-cyan-100" : "text-slate-400 hover:text-slate-100"}`}
+                className={`rounded-md px-2.5 py-1 ${metric === k ? "bg-accent font-semibold text-[#ffffff]" : "text-muted hover:text-ink"}`}
                 title={k === "ros" ? "Projected points for the rest of the season" : `Projected points this week (week ${model.week})`}
               >
                 {k === "ros" ? "ROS" : `Wk ${model.week}`}
@@ -151,7 +152,7 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
         </div>
       </div>
 
-      {profile && <p className="-mt-3 text-xs text-slate-400">{profile.summary}</p>}
+      {profile && <p className="-mt-3 text-xs text-muted">{profile.summary}</p>}
 
       <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
         <RosterPicker
@@ -188,8 +189,8 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
                 sub={
                   impact ? (
                     <>
-                      Playoffs {impact.before.playoffPct}% → <span className="font-mono text-slate-200">{impact.after.playoffPct}%</span> · Title{" "}
-                      {impact.before.titlePct}% → <span className="font-mono text-slate-200">{impact.after.titlePct}%</span>
+                      Playoffs {impact.before.playoffPct}% → <span className="font-mono text-ink">{impact.after.playoffPct}%</span> · Title{" "}
+                      {impact.before.titlePct}% → <span className="font-mono text-ink">{impact.after.titlePct}%</span>
                     </>
                   ) : undefined
                 }
@@ -219,49 +220,49 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
                 {result.perWeek.map((w) => (
                   <div key={w.week} className="flex h-full flex-1 flex-col items-center" title={`Week ${w.week}: ${w.me > 0 ? "+" : ""}${w.me}`}>
                     <div className="flex h-1/2 w-full items-end">
-                      {w.me > 0 && <div className="w-full rounded-t bg-lime-400/80" style={{ height: `${(w.me / maxAbs) * 100}%` }} />}
+                      {w.me > 0 && <div className="w-full rounded-t bg-good/80" style={{ height: `${(w.me / maxAbs) * 100}%` }} />}
                     </div>
                     <div className="flex h-1/2 w-full items-start">
-                      {w.me < 0 && <div className="w-full rounded-b bg-rose-400/80" style={{ height: `${(-w.me / maxAbs) * 100}%` }} />}
+                      {w.me < 0 && <div className="w-full rounded-b bg-bad/80" style={{ height: `${(-w.me / maxAbs) * 100}%` }} />}
                     </div>
-                    <span className={`font-mono text-[10px] ${w.week >= model.playoffStart ? "text-fuchsia-300" : "text-slate-500"}`}>{w.week}</span>
+                    <span className={`font-mono text-[10px] ${w.week >= model.playoffStart ? "text-purple" : "text-muted"}`}>{w.week}</span>
                   </div>
                 ))}
               </div>
             </div>
 
             {(result.market || result.expert) && (
-              <div className="grid gap-3 rounded-lg border border-white/10 bg-black/30 p-3 text-sm md:grid-cols-3">
+              <div className="grid gap-3 rounded-lg border border-line bg-sunken p-3 text-sm md:grid-cols-3">
                 <div>
                   <div className="hud-title mb-1.5">Trade market (FantasyCalc)</div>
                   {result.market ? (
-                    <div className="font-mono text-slate-400">
-                      Send <span className="text-rose-300">{result.market.give.toLocaleString()}</span> · Get{" "}
-                      <span className="text-lime-300">{result.market.get.toLocaleString()}</span>
+                    <div className="font-mono text-muted">
+                      Send <span className="text-bad">{result.market.give.toLocaleString()}</span> · Get{" "}
+                      <span className="text-good">{result.market.get.toLocaleString()}</span>
                     </div>
                   ) : (
-                    <div className="text-slate-500">No market values</div>
+                    <div className="text-muted">No market values</div>
                   )}
                 </div>
                 <div className="min-w-0">
                   <div className="hud-title mb-1.5">Experts (FantasyPros ROS)</div>
                   {result.expert ? (
                     <div className="space-y-0.5 text-xs">
-                      <div className="truncate text-slate-400">
+                      <div className="truncate text-muted">
                         Send: {result.expert.give.map((x) => `${x.name} ${x.rank}`).join(", ")}
                       </div>
-                      <div className="truncate text-slate-400">
+                      <div className="truncate text-muted">
                         Get: {result.expert.get.map((x) => `${x.name} ${x.rank}`).join(", ")}
                       </div>
                     </div>
                   ) : (
-                    <div className="text-slate-500">Not ranked</div>
+                    <div className="text-muted">Not ranked</div>
                   )}
                 </div>
                 <div>
                   <div className="hud-title mb-1.5">Fair?</div>
                   {result.consensusRatio != null ? (
-                    <div className={result.consensusRatio > 1.25 ? "text-rose-300" : result.consensusRatio < 0.8 ? "text-amber-200" : "text-lime-300"}>
+                    <div className={result.consensusRatio > 1.25 ? "text-bad" : result.consensusRatio < 0.8 ? "text-warn" : "text-good"}>
                       {result.consensusRatio > 1.25
                         ? "You overpay on value"
                         : result.consensusRatio >= 1.08
@@ -271,41 +272,41 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
                             : result.consensusRatio >= 0.8
                               ? "You get a little more"
                               : "Lopsided in your favor"}
-                      <span className="block text-[11px] text-slate-500">Market and expert rankings combined</span>
+                      <span className="block text-[11px] text-muted">Market and expert rankings combined</span>
                     </div>
                   ) : (
-                    <div className="text-slate-500">-</div>
+                    <div className="text-muted">-</div>
                   )}
                 </div>
               </div>
             )}
 
             {!isMe && (
-              <p className="-mb-2 text-xs text-slate-400">
+              <p className="-mb-2 text-xs text-muted">
                 Seen from {me.teamName}&apos;s side: below, &quot;you&quot; means {me.teamName} and &quot;they&quot; means {partner?.teamName}.
               </p>
             )}
             <div className="grid gap-4 md:grid-cols-2">
               <div>
                 <div className="hud-title mb-2">Why</div>
-                <ul className="space-y-1.5 text-sm text-slate-300">
+                <ul className="space-y-1.5 text-sm text-ink2">
                   {result.reasons.map((f, i) => (
-                    <li key={i}>• {f}</li>
+                    <li key={i} className="flex gap-2"><span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-current opacity-60" /><span>{f}</span></li>
                   ))}
                 </ul>
               </div>
               {result.flags.length > 0 && (
                 <div>
-                  <div className="hud-title mb-2 !text-amber-300">Watch out</div>
-                  <ul className="space-y-1.5 text-sm text-amber-100/90">
+                  <div className="hud-title mb-2 !text-warn">Watch out</div>
+                  <ul className="space-y-1.5 text-sm text-warn/90">
                     {result.flags.map((f, i) => (
-                      <li key={i}>• {f}</li>
+                      <li key={i} className="flex gap-2"><span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-current opacity-60" /><span>{f}</span></li>
                     ))}
                   </ul>
                 </div>
               )}
             </div>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-muted">
               The simulator plays out every remaining week with your best lineup, counts depth for injuries and byes, and weighs playoff weeks 1.5x. Player values blend usage, projections, FantasyPros rest-of-season consensus and the trade market. Breaking news can still move things, so ask the AI before you send it.
             </p>
 
@@ -323,7 +324,8 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
                   )
                 }
               >
-                ✦ Ask the AI agent for a full breakdown
+                <IconSparkles size={16} />
+                Ask the AI agent for a full breakdown
               </button>
             </div>
           </div>
@@ -352,7 +354,7 @@ function RosterPicker({
   locked?: string[];
   onLock?: (id: string) => void;
 }) {
-  const sel = tone === "rose" ? "border-rose-400/60 bg-rose-500/10" : "border-lime-400/60 bg-lime-500/10";
+  const sel = tone === "rose" ? "border-bad/60 bg-bad/10" : "border-good/60 bg-good/10";
   const { open } = usePlayerDrawer();
   return (
     <Panel title={title}>
@@ -363,20 +365,20 @@ function RosterPicker({
             <button
               key={v.p.id}
               onClick={() => onToggle(v.p.id)}
-              className={`flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition ${on ? sel : "border-transparent hover:bg-white/5"}`}
+              className={`flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition ${on ? sel : "border-transparent hover:bg-hover"}`}
             >
               <PosTag pos={v.p.pos} />
               <span className="flex min-w-0 flex-1 items-center">
-                <span className="min-w-0 truncate font-medium text-slate-100">{v.p.name}</span>
-                <span className="ml-1.5 hidden text-xs text-slate-500 sm:inline">{v.p.team}</span>
+                <span className="min-w-0 truncate font-medium text-ink">{v.p.name}</span>
+                <span className="ml-1.5 hidden text-xs text-muted sm:inline">{v.p.team}</span>
                 <InjuryTag status={v.p.injury} />
               </span>
               {(() => {
                 // "back W6 · 165 ROS": the return week goes on its own small line so names keep their room on phones.
                 const parts = label(v).split(" · ");
                 return (
-                  <span className="shrink-0 text-right font-mono text-xs leading-tight text-slate-400">
-                    {parts.length > 1 && <span className="block text-[10px] text-amber-300">{parts.slice(0, -1).join(" · ")}</span>}
+                  <span className="shrink-0 text-right font-mono text-xs leading-tight text-muted">
+                    {parts.length > 1 && <span className="block text-[10px] text-warn">{parts.slice(0, -1).join(" · ")}</span>}
                     {parts[parts.length - 1]}
                   </span>
                 );
@@ -398,10 +400,10 @@ function RosterPicker({
                     }
                   }}
                   className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border text-[11px] ${
-                    locked?.includes(v.p.id) ? "border-amber-300/60 text-amber-300" : "border-white/10 text-slate-600 hover:text-slate-300"
+                    locked?.includes(v.p.id) ? "border-warn/60 text-warn" : "border-line text-faint hover:text-ink2"
                   }`}
                 >
-                  {locked?.includes(v.p.id) ? "🔒" : "○"}
+                  {locked?.includes(v.p.id) ? <IconLock size={13} strokeWidth={2} /> : <IconUnlock size={13} />}
                 </span>
               )}
               <span
@@ -418,7 +420,7 @@ function RosterPicker({
                     open(v.p.id);
                   }
                 }}
-                className="grid h-6 w-6 shrink-0 place-items-center rounded-full border border-white/10 text-[11px] text-slate-400 hover:border-cyan-300/50 hover:text-cyan-200"
+                className="grid h-6 w-6 shrink-0 place-items-center rounded-full border border-line text-[11px] text-muted hover:border-accent/50 hover:text-accentstrong"
               >
                 i
               </span>
@@ -431,12 +433,12 @@ function RosterPicker({
 }
 
 function Big({ label, value, sub, tone = "cyan" }: { label: string; value: React.ReactNode; sub?: React.ReactNode; tone?: "cyan" | "lime" | "rose" }) {
-  const t = { cyan: "text-cyan-200", lime: "text-lime-300", rose: "text-rose-300" }[tone];
+  const t = { cyan: "text-accentstrong", lime: "text-good", rose: "text-bad" }[tone];
   return (
-    <div className="rounded-lg border border-white/10 bg-black/30 p-3">
+    <div className="rounded-lg border border-line bg-sunken p-3">
       <div className="hud-title">{label}</div>
-      <div className={`mt-1 font-display text-lg font-bold ${t}`}>{value}</div>
-      {sub && <div className="mt-1 text-xs text-slate-400">{sub}</div>}
+      <div className={`mt-1 font-display text-lg font-semibold ${t}`}>{value}</div>
+      {sub && <div className="mt-1 text-xs text-muted">{sub}</div>}
     </div>
   );
 }
@@ -490,20 +492,20 @@ function TradeFinder({
       title="Trade finder"
       right={
         locked.length > 0 ? (
-          <span className="text-[11px] text-amber-300/80">🔒 {locked.map(name).join(", ")}</span>
+          <span className="flex items-center gap-1 text-[11px] text-warn"><IconLock size={12} strokeWidth={2} /> {locked.map(name).join(", ")}</span>
         ) : (
-          <span className="text-[11px] text-slate-500">Tap ○ on your players to lock them</span>
+          <span className="flex items-center gap-1 text-[11px] text-muted">Tap <IconUnlock size={12} /> on your players to lock them</span>
         )
       }
     >
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm text-slate-400">Find me</span>
-        <div className="flex rounded-lg border border-white/10 p-0.5 font-mono text-xs">
+        <span className="text-sm text-muted">Find me</span>
+        <div className="flex rounded-lg border border-line bg-card p-0.5 text-xs font-medium">
           {NEEDS.map((n) => (
             <button
               key={n}
               onClick={() => setNeed(n)}
-              className={`rounded-md px-2.5 py-1 ${need === n ? "bg-cyan-400/20 text-cyan-100" : "text-slate-400 hover:text-slate-100"}`}
+              className={`rounded-md px-2.5 py-1 ${need === n ? "bg-accent font-semibold text-[#ffffff]" : "text-muted hover:text-ink"}`}
             >
               {n === "ANY" ? "Any upgrade" : n}
             </button>
@@ -514,24 +516,24 @@ function TradeFinder({
         </button>
       </div>
       {ideas && !ideas.length && (
-        <p className="mt-4 text-sm text-slate-400">
+        <p className="mt-4 text-sm text-muted">
           No fair deals found that clearly help you at {need === "ANY" ? "any position" : need}. Try another position or unlock someone.
         </p>
       )}
       {ideas && ideas.length > 0 && (
-        <ul className="mt-4 divide-y divide-white/5">
+        <ul className="mt-4 divide-y divide-linesoft">
           {ideas.map((i, k) => {
             const r = i.result;
             const partner = model.team(i.partnerId);
             return (
               <li key={k} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
                 <div className="min-w-0 flex-1 text-sm">
-                  <div className="text-slate-200">
-                    <span className="text-rose-300">{i.give.map(name).join(" + ")}</span>
-                    <span className="mx-2 text-slate-500">for</span>
-                    <span className="text-lime-300">{i.get.map(name).join(" + ")}</span>
+                  <div className="text-ink">
+                    <span className="text-bad">{i.give.map(name).join(" + ")}</span>
+                    <span className="mx-2 text-muted">for</span>
+                    <span className="text-good">{i.get.map(name).join(" + ")}</span>
                   </div>
-                  <div className="mt-0.5 text-xs text-slate-500">
+                  <div className="mt-0.5 text-xs text-muted">
                     {partner?.teamName} · <Delta value={r.perWeekAvg} suffix="/wk" /> · playoffs <Delta value={r.myPlayoffDelta} /> · {r.acceptance} to accept
                     {r.theirPerWeekAvg > 0.2 ? ` · helps them too (+${r.theirPerWeekAvg.toFixed(1)}/wk)` : ""}
                     {r.consensusRatio != null ? ` · ${r.consensusRatio <= 1.08 && r.consensusRatio >= 0.92 ? "fair value" : r.consensusRatio > 1.08 ? "you pay a bit more" : "you get a bit more"}` : ""}
@@ -551,7 +553,8 @@ function TradeFinder({
                       )
                     }
                   >
-                    ✦ Ask AI
+                    <IconSparkles size={15} />
+                    Ask AI
                   </button>
                 </div>
               </li>
@@ -560,7 +563,7 @@ function TradeFinder({
         </ul>
       )}
       {!ideas && progress == null && (
-        <p className="mt-3 text-xs text-slate-500">
+        <p className="mt-3 text-xs text-muted">
           Scans every team for rest-of-season deals both sides would take: your lineup improves, theirs doesn&apos;t get worse, and the
           value is fair by trade market and FantasyPros expert rankings. Each idea runs through the full week-by-week simulator.
         </p>
@@ -587,7 +590,7 @@ function TeamSelect({
       <span className="hud-title">{label}</span>
       <select className="input w-full" value={value} onChange={(e) => onChange(Number(e.target.value))}>
         {teams.map((t) => (
-          <option key={t.rosterId} value={t.rosterId} className="bg-slate-900">
+          <option key={t.rosterId} value={t.rosterId} className="bg-card">
             {t.teamName} ({t.ownerName}) {t.wins}-{t.losses}
             {t.rosterId === myId ? " · you" : ""}
           </option>

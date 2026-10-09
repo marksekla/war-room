@@ -15,12 +15,12 @@ function inline(text: string, keyBase: string): React.ReactNode[] {
     if (m.index > last) out.push(text.slice(last, m.index));
     const tok = m[0];
     const k = `${keyBase}-${i++}`;
-    if (tok.startsWith("**")) out.push(<strong key={k} className="font-semibold text-slate-50">{tok.slice(2, -2)}</strong>);
-    else if (tok.startsWith("`")) out.push(<code key={k} className="rounded bg-white/10 px-1 font-mono text-[0.85em] text-cyan-200">{tok.slice(1, -1)}</code>);
+    if (tok.startsWith("**")) out.push(<strong key={k} className="font-semibold text-ink">{tok.slice(2, -2)}</strong>);
+    else if (tok.startsWith("`")) out.push(<code key={k} className="rounded bg-track px-1 font-mono text-[0.85em] text-accentstrong">{tok.slice(1, -1)}</code>);
     else {
       const label = tok.slice(1, tok.indexOf("]"));
       out.push(
-        <a key={k} href={m[2]} target="_blank" rel="noreferrer" className="text-cyan-300 underline decoration-cyan-400/40 hover:decoration-cyan-300">
+        <a key={k} href={m[2]} target="_blank" rel="noreferrer" className="text-accentstrong underline decoration-accent/40 hover:decoration-accent">
           {label}
         </a>
       );
@@ -46,7 +46,7 @@ export default function Markdown({ text }: { text: string }) {
     if (h) {
       const size = h[1].length <= 2 ? "text-base" : "text-sm";
       blocks.push(
-        <div key={key++} className={`mt-4 font-display ${size} font-bold uppercase tracking-wider text-cyan-200`}>
+        <div key={key++} className={`mt-4 font-display ${size} font-semibold text-ink`}>
           {inline(h[2], `h${key}`)}
         </div>
       );
@@ -63,7 +63,7 @@ export default function Markdown({ text }: { text: string }) {
       const [head, ...body] = rows;
       blocks.push(
         <div key={key++} className="my-3 overflow-x-auto">
-          <table className="tbl rounded-lg border border-white/10">
+          <table className="tbl rounded-lg border border-line">
             <thead>
               <tr>{head?.map((c, j) => <th key={j}>{inline(c, `th${key}${j}`)}</th>)}</tr>
             </thead>
@@ -87,7 +87,7 @@ export default function Markdown({ text }: { text: string }) {
       }
       const Tag = ordered ? "ol" : "ul";
       blocks.push(
-        <Tag key={key++} className={`my-2 space-y-1 ${ordered ? "list-decimal" : "list-disc"} pl-5 marker:text-cyan-400`}>
+        <Tag key={key++} className={`my-2 space-y-1 ${ordered ? "list-decimal" : "list-disc"} pl-5 marker:text-accentstrong`}>
           {items.map((it, j) => (
             <li key={j} style={{ marginLeft: it.depth * 16 }}>
               {inline(it.text, `li${key}${j}`)}
@@ -113,5 +113,5 @@ export default function Markdown({ text }: { text: string }) {
       </p>
     );
   }
-  return <div className="text-sm text-slate-200">{blocks}</div>;
+  return <div className="text-sm text-ink">{blocks}</div>;
 }

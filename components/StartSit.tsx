@@ -6,6 +6,7 @@ import { fetchWeather, weatherNote } from "@/lib/live";
 import type { Weather } from "@/lib/types";
 import { InjuryTag, Panel, PosTag, RankChip } from "./ui";
 import { PlayerName, PracChip } from "./PlayerDrawer";
+import { IconAlert, IconRain, IconSnow, IconSwapVertical, IconWind } from "./icons";
 
 export default function StartSit({ model, myId }: { model: LeagueModel; myId: number }) {
   const [week, setWeek] = useState(model.week);
@@ -50,18 +51,18 @@ export default function StartSit({ model, myId }: { model: LeagueModel; myId: nu
     const olOut = cur ? model.unitOut(v.p.team, "ol").filter((x) => x.status !== "Questionable") : [];
     return (
       <tr key={(slot ?? "bn") + id}>
-        {slot !== undefined && <td className="font-display text-[10px] tracking-widest text-cyan-300/70">{slot.replace("_", " ")}</td>}
+        {slot !== undefined && <td className="text-[11px] font-semibold tracking-wide text-muted">{slot.replace("_", " ")}</td>}
         <td>
           <div className="flex items-center gap-2">
             <PosTag pos={v.p.pos} />
             <PlayerName v={v} className="max-w-[120px] sm:max-w-none" />
-            <span className="hidden text-xs text-slate-500 sm:inline">{v.p.team}</span>
+            <span className="hidden text-xs text-muted sm:inline">{v.p.team}</span>
             <InjuryTag status={v.p.injury} />
             {pc && pc.p < 0.95 && (
               <span
                 title={pc.why}
                 className={`whitespace-nowrap rounded border px-1 font-mono text-[10px] ${
-                  pc.p >= 0.8 ? "border-lime-400/40 text-lime-300" : pc.p >= 0.5 ? "border-amber-300/40 text-amber-200" : "border-rose-400/40 text-rose-300"
+                  pc.p >= 0.8 ? "border-good/40 text-good" : pc.p >= 0.5 ? "border-warn/40 text-warn" : "border-bad/40 text-bad"
                 }`}
               >
                 {Math.round(pc.p * 100)}% to play
@@ -75,7 +76,7 @@ export default function StartSit({ model, myId }: { model: LeagueModel; myId: nu
         <td className="font-mono font-semibold neon-text">
           {exp.toFixed(1)}
           {cur && v.ecrWeek != null && (
-            <span className="block text-[10px] font-normal text-slate-500">
+            <span className="block text-[10px] font-normal text-muted">
               Wk{week} {v.p.pos}
               {Math.round(v.ecrWeek)}
             </span>
@@ -88,7 +89,7 @@ export default function StartSit({ model, myId }: { model: LeagueModel; myId: nu
               {dOut.length >= 2 && (
                 <span
                   title={`${g.opp} defense missing: ${dOut.map((x) => `${x.name} (${x.pos}, ${x.status})`).join(", ")}`}
-                  className="rounded border border-lime-400/40 px-1 text-[10px] text-lime-300"
+                  className="rounded border border-good/40 px-1 text-[10px] text-good"
                 >
                   -{dOut.length}D
                 </span>
@@ -96,22 +97,22 @@ export default function StartSit({ model, myId }: { model: LeagueModel; myId: nu
               {olOut.length >= 2 && (
                 <span
                   title={`${v.p.team} O-line missing: ${olOut.map((x) => `${x.name} (${x.pos}, ${x.status})`).join(", ")}`}
-                  className="rounded border border-rose-400/40 px-1 text-[10px] text-rose-300"
+                  className="rounded border border-bad/40 px-1 text-[10px] text-bad"
                 >
                   OL-{olOut.length}
                 </span>
               )}
               {wn && (
-                <span title={wn.label} className={wn.severe ? "text-amber-300" : "text-slate-400"}>
-                  {/wind/.test(wn.label) ? "≋" : /rain/.test(wn.label) ? "☂" : "❄"}
+                <span title={wn.label} aria-label={wn.label} className={`inline-grid place-items-center ${wn.severe ? "text-warn" : "text-muted"}`}>
+                  {/wind/.test(wn.label) ? <IconWind size={14} /> : /rain/.test(wn.label) ? <IconRain size={14} /> : <IconSnow size={14} />}
                 </span>
               )}
             </span>
           ) : (
-            <span className="text-amber-300">BYE</span>
+            <span className="text-warn">BYE</span>
           )}
         </td>
-        <td className="font-mono text-xs text-slate-400">{g ? fmtKick(g.game.kickoff) : "-"}</td>
+        <td className="font-mono text-xs text-muted">{g ? fmtKick(g.game.kickoff) : "-"}</td>
         <td className="mhide font-mono text-xs">{g?.teamSpread != null ? (g.teamSpread > 0 ? `+${g.teamSpread}` : g.teamSpread) : "-"}</td>
         <td className="mhide font-mono text-xs">{g?.impliedTotal != null ? g.impliedTotal.toFixed(1) : "-"}</td>
       </tr>
@@ -126,17 +127,17 @@ export default function StartSit({ model, myId }: { model: LeagueModel; myId: nu
           <button
             key={w}
             onClick={() => setWeek(w)}
-            className={`rounded px-3 py-1 font-mono text-sm ${week === w ? "bg-cyan-400/20 text-cyan-100 shadow-glow" : "text-slate-400 hover:text-slate-100"}`}
+            className={`rounded px-3 py-1 font-mono text-sm ${week === w ? "bg-accent font-semibold text-[#ffffff]" : "text-muted hover:bg-hover hover:text-ink"}`}
           >
             {w}
           </button>
         ))}
         <span className="ml-auto text-right">
-          <span className="font-display text-xl font-bold neon-text">{r.lineup.total.toFixed(1)} pts</span>
+          <span className="font-display text-xl font-semibold neon-text">{r.lineup.total.toFixed(1)} pts</span>
           {h2h && (
-            <span className="block text-xs text-slate-400">
+            <span className="block text-xs text-muted">
               vs {h2h.opponent.teamName} {h2h.oppProj.toFixed(1)} ·{" "}
-              <span className={h2h.winProb >= 55 ? "text-lime-300" : h2h.winProb <= 45 ? "text-rose-300" : "text-slate-200"}>{h2h.winProb}% to win</span>
+              <span className={h2h.winProb >= 55 ? "text-good" : h2h.winProb <= 45 ? "text-bad" : "text-ink"}>{h2h.winProb}% to win</span>
             </span>
           )}
         </span>
@@ -145,18 +146,21 @@ export default function StartSit({ model, myId }: { model: LeagueModel; myId: nu
       <Compare model={model} myId={myId} week={week} wx={wx} />
 
       {alerts.length > 0 && (
-        <div className="panel border-amber-400/30 p-4">
-          <div className="hud-title !text-amber-300">Lineup alerts</div>
-          <ul className="mt-2 space-y-1 text-sm text-amber-100">
+        <div className="panel border-warn/30 p-4">
+          <div className="hud-title !text-warn">Lineup alerts</div>
+          <ul className="mt-2 space-y-1 text-sm text-warn">
             {alerts.map((w, i) => (
-              <li key={i}>⚠ {w}</li>
+              <li key={i} className="flex items-start gap-2">
+                <IconAlert size={15} className="mt-0.5" />
+                <span>{w}</span>
+              </li>
             ))}
           </ul>
         </div>
       )}
 
       <Panel title="Optimal lineup" corners>
-        <div className="-mx-4 overflow-x-auto">
+        <div className="-mx-4 sm:-mx-5 overflow-x-auto">
           <table className="tbl">
             <thead>
               <tr>
@@ -175,8 +179,8 @@ export default function StartSit({ model, myId }: { model: LeagueModel; myId: nu
                   row(f.id, f.slot, f.val)
                 ) : (
                   <tr key={f.slot + "empty"}>
-                    <td className="font-display text-[10px] tracking-widest text-cyan-300/70">{f.slot}</td>
-                    <td colSpan={4} className="text-rose-300">Empty, pick someone up</td>
+                    <td className="text-[11px] font-semibold tracking-wide text-muted">{f.slot}</td>
+                    <td colSpan={4} className="text-bad">Empty, pick someone up</td>
                   </tr>
                 )
               )}
@@ -186,7 +190,7 @@ export default function StartSit({ model, myId }: { model: LeagueModel; myId: nu
       </Panel>
 
       <Panel title="Bench">
-        <div className="-mx-4 overflow-x-auto">
+        <div className="-mx-4 sm:-mx-5 overflow-x-auto">
           <table className="tbl">
             <thead>
               <tr>
@@ -202,8 +206,8 @@ export default function StartSit({ model, myId }: { model: LeagueModel; myId: nu
           </table>
         </div>
       </Panel>
-      <p className="text-xs text-slate-500">
-        Expected points blend Sleeper, ESPN and FantasyPros consensus projections, FantasyPros weekly expert ranks, season-long usage, matchup and Vegas, times each player&apos;s chance to play (learned from past injury reports plus this week&apos;s practice reports and news). When a teammate is out, projections that already react to the depth chart count more. -2D means two of the opponent&apos;s defensive starters are out; OL-2 means two of his own linemen are out (hover or tap a player for names). ≋ ☂ ❄ mark wind, rain/snow or cold at kickoff. Under each projection, labels like Under each projection, Wk{week} RB10 style labels arequot;Wk{week} RB10Under each projection, Wk{week} RB10 style labels arequot; are the FantasyPros expert consensus rank for this week only. Check final news before lock; the AI agent can do that for you.
+      <p className="text-xs text-muted">
+        Expected points blend Sleeper, ESPN and FantasyPros consensus projections, FantasyPros weekly expert ranks, season-long usage, matchup and Vegas, times each player&apos;s chance to play (learned from past injury reports plus this week&apos;s practice reports and news). When a teammate is out, projections that already react to the depth chart count more. -2D means two of the opponent&apos;s defensive starters are out; OL-2 means two of his own linemen are out (hover or tap a player for names). Weather icons mark wind, rain/snow or cold at kickoff. Labels like Wk{week} RB10 under each projection are the FantasyPros expert consensus rank for this week only. Check final news before lock; the AI agent can do that for you.
       </p>
     </div>
   );
@@ -223,7 +227,8 @@ function Compare({ model, myId, week, wx }: { model: LeagueModel; myId: number; 
   if (!open)
     return (
       <button className="btn" onClick={() => setOpen(true)}>
-        ⇆ Compare players
+        <IconSwapVertical size={16} />
+        Compare players
       </button>
     );
 
@@ -232,7 +237,7 @@ function Compare({ model, myId, week, wx }: { model: LeagueModel; myId: number; 
     <Panel
       title={`Compare · week ${week}`}
       right={
-        <button className="text-xs text-slate-400 hover:text-slate-100" onClick={() => setOpen(false)}>
+        <button className="text-xs text-muted hover:text-ink" onClick={() => setOpen(false)}>
           Close
         </button>
       }
@@ -242,32 +247,32 @@ function Compare({ model, myId, week, wx }: { model: LeagueModel; myId: number; 
           <button
             key={v.p.id}
             onClick={() => toggle(v.p.id)}
-            className={`rounded-full border px-2.5 py-1 text-xs ${ids.includes(v.p.id) ? "border-cyan-300/70 bg-cyan-400/15 text-cyan-100" : "border-white/10 text-slate-400 hover:text-slate-100"}`}
+            className={`rounded-full border px-2.5 py-1 text-xs ${ids.includes(v.p.id) ? "border-accent/70 bg-accenttint text-accentstrong" : "border-line text-muted hover:text-ink"}`}
           >
-            <span className="mr-1 font-mono text-[10px] text-slate-500">{v.p.pos}</span>
+            <span className="mr-1 font-mono text-[10px] text-muted">{v.p.pos}</span>
             {v.p.name}
           </button>
         ))}
       </div>
-      {!r && <p className="mt-3 text-xs text-slate-500">Pick 2 or 3 players.</p>}
+      {!r && <p className="mt-3 text-xs text-muted">Pick 2 or 3 players.</p>}
       {r && (
         <>
-          <div className="-mx-4 mt-4 overflow-x-auto">
+          <div className="-mx-4 sm:-mx-5 mt-4 overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr>
                   <th className="w-24 px-2" />
                   {r.rows.map((x) => (
-                    <th key={x.v.p.id} className={`${cell} font-display text-xs ${r.pick === x.v.p.id ? "text-lime-300" : "text-slate-200"}`}>
+                    <th key={x.v.p.id} className={`${cell} font-display text-xs ${r.pick === x.v.p.id ? "text-good" : "text-ink"}`}>
                       {x.v.p.name}
-                      {r.pick === x.v.p.id && <div className="text-[10px] tracking-widest text-lime-300">START</div>}
+                      {r.pick === x.v.p.id && <div className="text-[10px] tracking-widest text-good">START</div>}
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="[&_td]:border-t [&_td]:border-white/5">
+              <tbody className="[&_td]:border-t [&_td]:border-linesoft">
                 <tr>
-                  <td className="px-2 py-1.5 text-xs text-slate-500">Projection</td>
+                  <td className="px-2 py-1.5 text-xs text-muted">Projection</td>
                   {r.rows.map((x) => (
                     <td key={x.v.p.id} className={`${cell} font-mono text-base font-semibold neon-text`}>
                       {x.range.exp.toFixed(1)}
@@ -275,15 +280,15 @@ function Compare({ model, myId, week, wx }: { model: LeagueModel; myId: number; 
                   ))}
                 </tr>
                 <tr>
-                  <td className="px-2 py-1.5 text-xs text-slate-500">Floor to ceiling</td>
+                  <td className="px-2 py-1.5 text-xs text-muted">Floor to ceiling</td>
                   {r.rows.map((x) => (
-                    <td key={x.v.p.id} className={`${cell} font-mono text-xs text-slate-300`}>
+                    <td key={x.v.p.id} className={`${cell} font-mono text-xs text-ink2`}>
                       {x.range.floor.toFixed(0)} to {x.range.ceiling.toFixed(0)}
                     </td>
                   ))}
                 </tr>
                 <tr>
-                  <td className="px-2 py-1.5 text-xs text-slate-500">Matchup</td>
+                  <td className="px-2 py-1.5 text-xs text-muted">Matchup</td>
                   {r.rows.map((x) => (
                     <td key={x.v.p.id} className={`${cell} font-mono text-xs`}>
                       {x.g ? (
@@ -291,13 +296,13 @@ function Compare({ model, myId, week, wx }: { model: LeagueModel; myId: number; 
                           {x.g.home ? "vs" : "@"} {x.g.opp} <RankChip rank={x.dvpRank} />
                         </span>
                       ) : (
-                        <span className="text-amber-300">BYE</span>
+                        <span className="text-warn">BYE</span>
                       )}
                     </td>
                   ))}
                 </tr>
                 <tr>
-                  <td className="px-2 py-1.5 text-xs text-slate-500">Team total (Vegas)</td>
+                  <td className="px-2 py-1.5 text-xs text-muted">Team total (Vegas)</td>
                   {r.rows.map((x) => (
                     <td key={x.v.p.id} className={`${cell} font-mono text-xs`}>
                       {x.g?.impliedTotal != null ? x.g.impliedTotal.toFixed(1) : "-"}
@@ -305,42 +310,42 @@ function Compare({ model, myId, week, wx }: { model: LeagueModel; myId: number; 
                   ))}
                 </tr>
                 <tr>
-                  <td className="px-2 py-1.5 text-xs text-slate-500">Injuries that matter</td>
+                  <td className="px-2 py-1.5 text-xs text-muted">Injuries that matter</td>
                   {r.rows.map((x) => (
                     <td key={x.v.p.id} className={`${cell} text-[11px] leading-snug`}>
-                      {x.defOut.length > 0 && <div className="text-lime-300">{x.g?.opp} D missing {x.defOut.length}</div>}
-                      {x.olOut.length > 0 && <div className="text-rose-300">Own OL missing {x.olOut.length}</div>}
-                      {!x.defOut.length && !x.olOut.length && <span className="text-slate-600">-</span>}
+                      {x.defOut.length > 0 && <div className="text-good">{x.g?.opp} D missing {x.defOut.length}</div>}
+                      {x.olOut.length > 0 && <div className="text-bad">Own OL missing {x.olOut.length}</div>}
+                      {!x.defOut.length && !x.olOut.length && <span className="text-faint">-</span>}
                     </td>
                   ))}
                 </tr>
                 <tr>
-                  <td className="px-2 py-1.5 text-xs text-slate-500">Status</td>
+                  <td className="px-2 py-1.5 text-xs text-muted">Status</td>
                   {r.rows.map((x) => {
                     const pr = x.v.adv?.prac;
                     return (
                       <td key={x.v.p.id} className={`${cell} text-[11px]`}>
-                        {x.v.p.injury ? <span className="text-amber-300">{x.v.p.injury}</span> : <span className="text-slate-400">Healthy</span>}
-                        {pr && pr.w === week && pr.st && pr.st !== "FP" && <div className="text-slate-500">{pr.st} in practice</div>}
+                        {x.v.p.injury ? <span className="text-warn">{x.v.p.injury}</span> : <span className="text-muted">Healthy</span>}
+                        {pr && pr.w === week && pr.st && pr.st !== "FP" && <div className="text-muted">{pr.st} in practice</div>}
                       </td>
                     );
                   })}
                 </tr>
                 <tr>
-                  <td className="px-2 py-1.5 text-xs text-slate-500">Weather</td>
+                  <td className="px-2 py-1.5 text-xs text-muted">Weather</td>
                   {r.rows.map((x) => {
                     const n = weatherNote(wx[x.v.p.team ?? ""]);
                     return (
-                      <td key={x.v.p.id} className={`${cell} text-[11px] ${n?.severe ? "text-amber-300" : "text-slate-400"}`}>
+                      <td key={x.v.p.id} className={`${cell} text-[11px] ${n?.severe ? "text-warn" : "text-muted"}`}>
                         {n?.label ?? "-"}
                       </td>
                     );
                   })}
                 </tr>
                 <tr>
-                  <td className="px-2 py-1.5 text-xs text-slate-500">Kickoff</td>
+                  <td className="px-2 py-1.5 text-xs text-muted">Kickoff</td>
                   {r.rows.map((x) => (
-                    <td key={x.v.p.id} className={`${cell} font-mono text-[11px] text-slate-400`}>
+                    <td key={x.v.p.id} className={`${cell} font-mono text-[11px] text-muted`}>
                       {x.g ? fmtKick(x.g.game.kickoff) : "-"}
                     </td>
                   ))}
@@ -348,7 +353,7 @@ function Compare({ model, myId, week, wx }: { model: LeagueModel; myId: number; 
               </tbody>
             </table>
           </div>
-          <p className="mt-3 text-sm text-slate-200">{r.why}</p>
+          <p className="mt-3 text-sm text-ink">{r.why}</p>
         </>
       )}
     </Panel>

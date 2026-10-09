@@ -13,14 +13,14 @@ const FILTERS: (Position | "ALL")[] = ["ALL", "QB", "RB", "WR", "TE"];
 const LONG = new Set(["IR", "PUP", "Sus", "NA"]);
 
 function PracticeChips({ days }: { days: { day: string; st: "DNP" | "LP" | "FP" }[] }) {
-  if (!days.length) return <span className="text-xs text-slate-600">No report yet</span>;
+  if (!days.length) return <span className="text-xs text-faint">No report yet</span>;
   return (
     <div className="flex flex-wrap gap-1">
       {days.map((d) => (
         <span
           key={d.day}
           className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${
-            d.st === "FP" ? "border-lime-400/40 text-lime-300" : d.st === "LP" ? "border-amber-300/40 text-amber-200" : "border-rose-400/40 text-rose-300"
+            d.st === "FP" ? "border-good/40 text-good" : d.st === "LP" ? "border-warn/40 text-warn" : "border-bad/40 text-bad"
           }`}
         >
           {d.day === "Latest" ? "" : `${d.day} `}
@@ -81,13 +81,13 @@ export default function Availability({ model, myId }: { model: LeagueModel; myId
   return (
     <div className="space-y-6">
       {weekOver && (
-        <div className="panel border-amber-400/30 p-4 text-sm text-amber-100">
+        <div className="panel border-warn/30 p-4 text-sm text-warn">
           Week {model.week} is over, so these show who actually played. Chances for week {model.week + 1} appear once Sleeper rolls over to the
           new week (usually Tuesday or Wednesday), right as the first practice reports come out.
         </div>
       )}
       <Panel
-        title={`Are they playing? · Week ${model.week}`}
+        title={`Week ${model.week} injury and practice report`}
         corners
         right={
           <div className="flex flex-wrap gap-1">
@@ -95,7 +95,7 @@ export default function Availability({ model, myId }: { model: LeagueModel; myId
               <button
                 key={f}
                 onClick={() => setPos(f)}
-                className={`rounded px-2.5 py-1 font-mono text-xs ${pos === f ? "bg-cyan-400/20 text-cyan-100 shadow-glow" : "text-slate-400 hover:text-slate-100"}`}
+                className={`rounded px-2.5 py-1 font-mono text-xs ${pos === f ? "bg-accent font-semibold text-[#ffffff]" : "text-muted hover:bg-hover hover:text-ink"}`}
               >
                 {f}
               </button>
@@ -105,20 +105,20 @@ export default function Availability({ model, myId }: { model: LeagueModel; myId
       >
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <input className="input w-full sm:w-64" placeholder="Search player or team" value={q} onChange={(e) => setQ(e.target.value)} />
-          <div className="flex rounded-lg border border-white/10 p-0.5 font-mono text-xs">
+          <div className="flex rounded-lg border border-line bg-card p-0.5 text-xs font-medium">
             {(["chance", "kickoff"] as const).map((k) => (
               <button
                 key={k}
                 onClick={() => setSort(k)}
-                className={`rounded-md px-2.5 py-1 ${sort === k ? "bg-cyan-400/20 text-cyan-100" : "text-slate-400 hover:text-slate-100"}`}
+                className={`rounded-md px-2.5 py-1 ${sort === k ? "bg-accent font-semibold text-[#ffffff]" : "text-muted hover:text-ink"}`}
               >
                 {k === "chance" ? "Least likely first" : "By kickoff"}
               </button>
             ))}
           </div>
-          <label className="ml-auto flex cursor-pointer items-center gap-2 text-sm text-slate-300">
+          <label className="ml-auto flex cursor-pointer items-center gap-2 text-sm text-ink2">
             <input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} className="h-4 w-4 accent-cyan-400" />
-            My team{myFlagged.length ? <span className="font-mono text-xs text-cyan-300">({myFlagged.length})</span> : null}
+            My team{myFlagged.length ? <span className="font-mono text-xs text-accentstrong">({myFlagged.length})</span> : null}
           </label>
         </div>
 
@@ -127,7 +127,7 @@ export default function Availability({ model, myId }: { model: LeagueModel; myId
         ) : (
           <>
             {/* Desktop table */}
-            <div className="-mx-4 hidden overflow-x-auto md:block">
+            <div className="-mx-4 sm:-mx-5 hidden overflow-x-auto md:block">
               <table className="tbl">
                 <thead>
                   <tr>
@@ -142,14 +142,14 @@ export default function Availability({ model, myId }: { model: LeagueModel; myId
                 </thead>
                 <tbody>
                   {shown.map(({ v, pc, kick, opp, home }) => (
-                    <tr key={v.p.id} className={v.ownerRosterId === myId ? "bg-cyan-400/10" : ""}>
+                    <tr key={v.p.id} className={v.ownerRosterId === myId ? "bg-accenttint" : ""}>
                       <td>
                         <div className="flex items-center gap-2">
                           <PosTag pos={v.p.pos} />
                           <div className="min-w-0">
-                            <div className="truncate text-slate-100">{v.p.name}</div>
-                            <div className="truncate text-[11px] text-slate-500">
-                              {v.p.team} · {v.ownerRosterId === myId ? <span className="text-cyan-300">Your team</span> : model.ownerName(v.p.id)}
+                            <div className="truncate text-ink">{v.p.name}</div>
+                            <div className="truncate text-[11px] text-muted">
+                              {v.p.team} · {v.ownerRosterId === myId ? <span className="text-accentstrong">Your team</span> : model.ownerName(v.p.id)}
                             </div>
                           </div>
                         </div>
@@ -158,13 +158,13 @@ export default function Availability({ model, myId }: { model: LeagueModel; myId
                         <ChanceRing p={pc.p} size={42} />
                       </td>
                       <td className="text-xs">
-                        <div className="text-slate-200">{pc.status ?? "No designation"}</div>
-                        <div className="text-[10px] text-slate-500">{pc.official ? "Final report" : "Not final yet"}</div>
+                        <div className="text-ink">{pc.status ?? "No designation"}</div>
+                        <div className="text-[10px] text-muted">{pc.official ? "Final report" : "Not final yet"}</div>
                       </td>
-                      <td className="text-xs text-slate-300">{pc.injury ?? "-"}</td>
-                      <td className="whitespace-nowrap font-mono text-xs text-slate-300">
+                      <td className="text-xs text-ink2">{pc.injury ?? "-"}</td>
+                      <td className="whitespace-nowrap font-mono text-xs text-ink2">
                         {home ? "vs" : "@"} {opp}
-                        <div className="text-[10px] text-slate-500">{fmtKick(new Date(kick).toISOString())}</div>
+                        <div className="text-[10px] text-muted">{fmtKick(new Date(kick).toISOString())}</div>
                       </td>
                       <td>
                         <PracticeChips days={pc.practice} />
@@ -184,14 +184,14 @@ export default function Availability({ model, myId }: { model: LeagueModel; myId
             <ul className="space-y-2 md:hidden">
               {shown.map(({ v, pc, kick, opp, home }) => (
                 <li key={v.p.id}>
-                  <button onClick={() => open(v.p.id)} className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left ${v.ownerRosterId === myId ? "border-cyan-400/30 bg-cyan-400/10" : "border-white/10 bg-black/20"}`}>
+                  <button onClick={() => open(v.p.id)} className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left ${v.ownerRosterId === myId ? "border-accent/30 bg-accenttint" : "border-line bg-sunken"}`}>
                     <ChanceRing p={pc.p} size={46} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
                         <PosTag pos={v.p.pos} />
-                        <span className="truncate text-sm font-semibold text-slate-100">{v.p.name}</span>
+                        <span className="truncate text-sm font-semibold text-ink">{v.p.name}</span>
                       </div>
-                      <div className="mt-0.5 truncate text-[11px] text-slate-400">
+                      <div className="mt-0.5 truncate text-[11px] text-muted">
                         {pc.status ?? "No designation"}
                         {pc.injury ? ` · ${pc.injury}` : ""} · {home ? "vs" : "@"} {opp} {fmtKick(new Date(kick).toISOString())}
                       </div>
@@ -205,7 +205,7 @@ export default function Availability({ model, myId }: { model: LeagueModel; myId
             </ul>
           </>
         )}
-        <p className="mt-4 text-xs leading-relaxed text-slate-500">
+        <p className="mt-4 text-xs leading-relaxed text-muted">
           Chances come from a model trained on {n ? n.toLocaleString() : "thousands of"} real injury designations from recent seasons (designation, last
           practice, missed last game, injury type, position), updated with this week&apos;s official NFL injury report (read live from nfl.com
           every 15 minutes) and ESPN injury notes. A practice day only shows once that day&apos;s report is out. Before the final

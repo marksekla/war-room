@@ -13,12 +13,12 @@ export default function Waivers({ model, myId }: { model: LeagueModel; myId: num
   const [mode, setMode] = useState<"ros" | "stream">("ros");
   return (
     <div className="space-y-6">
-      <div className="flex rounded-lg border border-white/10 p-0.5 font-mono text-xs sm:w-fit">
+      <div className="flex rounded-lg border border-line bg-card p-0.5 text-xs font-medium sm:w-fit">
         {(["ros", "stream"] as const).map((k) => (
           <button
             key={k}
             onClick={() => setMode(k)}
-            className={`flex-1 rounded-md px-3 py-1.5 sm:flex-none ${mode === k ? "bg-cyan-400/20 text-cyan-100" : "text-slate-400 hover:text-slate-100"}`}
+            className={`flex-1 rounded-md px-3 py-1.5 sm:flex-none ${mode === k ? "bg-accent font-semibold text-[#ffffff]" : "text-muted hover:text-ink"}`}
           >
             {k === "ros" ? "Rest of season" : "Streamers (one week)"}
           </button>
@@ -63,7 +63,7 @@ function RosWaivers({ model, myId }: { model: LeagueModel; myId: number }) {
               <button
                 key={f}
                 onClick={() => setPos(f)}
-                className={`rounded px-2.5 py-1 font-mono text-xs ${pos === f ? "bg-cyan-400/20 text-cyan-100 shadow-glow" : "text-slate-400 hover:text-slate-100"}`}
+                className={`rounded px-2.5 py-1 font-mono text-xs ${pos === f ? "bg-accent font-semibold text-[#ffffff]" : "text-muted hover:bg-hover hover:text-ink"}`}
               >
                 {f}
               </button>
@@ -72,27 +72,27 @@ function RosWaivers({ model, myId }: { model: LeagueModel; myId: number }) {
         }
       >
         <div className="mb-4 flex flex-wrap items-center gap-3 text-sm">
-          <span className="text-slate-400">If I drop</span>
+          <span className="text-muted">If I drop</span>
           <select className="input w-full sm:w-auto" value={dropId} onChange={(e) => setDropId(e.target.value)}>
             {drops.map((d) => (
-              <option key={d.p.id} value={d.p.id} className="bg-slate-900">
+              <option key={d.p.id} value={d.p.id} className="bg-card">
                 {d.p.name} ({d.p.pos}, {d.rosPoints.toFixed(0)} ROS pts)
               </option>
             ))}
           </select>
-          <span className="text-xs text-slate-500">
+          <span className="text-xs text-muted">
             Lineup gain = extra points in lineups you&apos;d actually start through the championship, compared with streaming the best free agent
             when you need one.
           </span>
         </div>
         {faab && (
-          <p className="-mt-2 mb-4 text-xs text-slate-400">
-            FAAB left: <span className="font-mono text-slate-200">${faab.remaining}</span> of ${faab.budget}
+          <p className="-mt-2 mb-4 text-xs text-muted">
+            FAAB left: <span className="font-mono text-ink">${faab.remaining}</span> of ${faab.budget}
             {faab.median != null && (
               <>
                 {" "}
-                · League&apos;s median winning bid <span className="font-mono text-slate-200">${faab.median}</span>, top{" "}
-                <span className="font-mono text-slate-200">${faab.top}</span> ({faab.claims} claims)
+                · League&apos;s median winning bid <span className="font-mono text-ink">${faab.median}</span>, top{" "}
+                <span className="font-mono text-ink">${faab.top}</span> ({faab.claims} claims)
               </>
             )}
           </p>
@@ -100,7 +100,7 @@ function RosWaivers({ model, myId }: { model: LeagueModel; myId: number }) {
         {!rows.length ? (
           <Empty>No free agents found at this position.</Empty>
         ) : (
-          <div className="-mx-4 overflow-x-auto">
+          <div className="-mx-4 sm:-mx-5 overflow-x-auto">
             <table className="tbl tbl-sticky">
               <thead>
                 <tr>
@@ -129,17 +129,17 @@ function RosWaivers({ model, myId }: { model: LeagueModel; myId: number }) {
                           <div className="min-w-0">
                             <div className="flex items-center gap-2">
                               <PlayerName v={v} className="max-w-[130px] sm:max-w-none" />
-                              <span className="hidden text-xs text-slate-500 sm:inline">{v.p.team}</span>
+                              <span className="hidden text-xs text-muted sm:inline">{v.p.team}</span>
                               <InjuryTag status={v.p.injury} />
                             </div>
                             {(cuff || rising) && (
                               <div className="mt-0.5 flex flex-wrap gap-x-2 text-[10px] leading-tight">
                                 {cuff && (
-                                  <span className="text-violet-300" title={`${cuff.missChance}% chance ${cuff.starter} misses a game the rest of the season`}>
+                                  <span className="text-purple" title={`${cuff.missChance}% chance ${cuff.starter} misses a game the rest of the season`}>
                                     Handcuff: ~{cuff.ifOutPg.toFixed(0)}/gm if {cuff.starter.replace(/^(\S)\S*\s+/, "$1. ")} is out
                                   </span>
                                 )}
-                                {rising && <span className="text-lime-300">Snaps rising</span>}
+                                {rising && <span className="text-good">Snaps rising</span>}
                               </div>
                             )}
                           </div>
@@ -150,16 +150,16 @@ function RosWaivers({ model, myId }: { model: LeagueModel; myId: number }) {
                           <Delta value={gain} />
                         </span>
                         {weeks > 0 && (
-                          <span className={`block text-[10px] ${starts >= 2 ? "text-slate-400" : "text-slate-600"}`}>
+                          <span className={`block text-[10px] ${starts >= 2 ? "text-muted" : "text-faint"}`}>
                             {starts ? `starts ${starts}/${weeks} wks` : "bench only"}
                           </span>
                         )}
-                        {cuff && cuff.pts >= 0.5 && <span className="block text-[10px] text-violet-300">+{cuff.pts.toFixed(1)} upside</span>}
+                        {cuff && cuff.pts >= 0.5 && <span className="block text-[10px] text-purple">+{cuff.pts.toFixed(1)} upside</span>}
                       </td>
-                      {faab && <td className="font-mono text-amber-200">{faab.suggest(gain) ? `$${faab.suggest(gain)}` : "-"}</td>}
+                      {faab && <td className="font-mono text-warn">{faab.suggest(gain) ? `$${faab.suggest(gain)}` : "-"}</td>}
                       <td className="font-mono">{v.rosPoints.toFixed(0)}</td>
                       <td className="mhide font-mono">{v.last3.toFixed(1)}</td>
-                      <td className="font-mono text-cyan-200">{model.gameFor(v.p.team, model.week) ? model.projection(v.p.id).toFixed(1) : "-"}</td>
+                      <td className="font-mono text-accentstrong">{model.gameFor(v.p.team, model.week) ? model.projection(v.p.id).toFixed(1) : "-"}</td>
                       <td><Meter value={v.snapShare} /></td>
                       <td><Meter value={v.targetShare} max={0.4} tone="violet" /></td>
                       <td className="mhide"><Meter value={v.carryShare} max={0.8} tone="lime" /></td>
@@ -169,10 +169,10 @@ function RosWaivers({ model, myId }: { model: LeagueModel; myId: number }) {
                             {g.home ? "vs" : "@"} {g.opp} <RankChip rank={d?.rank} />
                           </span>
                         ) : (
-                          <span className="text-xs text-amber-300">BYE</span>
+                          <span className="text-xs text-warn">BYE</span>
                         )}
                       </td>
-                      <td className="font-mono text-fuchsia-300">{v.trendingAdds ? v.trendingAdds.toLocaleString() : "-"}</td>
+                      <td className="font-mono text-purple">{v.trendingAdds ? v.trendingAdds.toLocaleString() : "-"}</td>
                     </tr>
                   );
                 })}
@@ -181,7 +181,7 @@ function RosWaivers({ model, myId }: { model: LeagueModel; myId: number }) {
           </div>
         )}
       </Panel>
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-muted">
         Faded gains are under 3 points for the rest of the season, so they&apos;re basically even. A backup who&apos;d only fill a bye week or wait
         for an injury scores low here on purpose: you can pick up a fill-in that week instead of holding a bench spot all season. Handcuffs show what a backup would score per
         game if the starter ahead of him misses time; &quot;upside&quot; is those extra points weighted by the chance it happens, and it counts in
@@ -224,7 +224,7 @@ function Streamers({ model, myId }: { model: LeagueModel; myId: number }) {
             <button
               key={f}
               onClick={() => setPos(f)}
-              className={`rounded px-2.5 py-1 font-mono text-xs ${pos === f ? "bg-cyan-400/20 text-cyan-100 shadow-glow" : "text-slate-400 hover:text-slate-100"}`}
+              className={`rounded px-2.5 py-1 font-mono text-xs ${pos === f ? "bg-accent font-semibold text-[#ffffff]" : "text-muted hover:bg-hover hover:text-ink"}`}
             >
               {f}
             </button>
@@ -238,15 +238,15 @@ function Streamers({ model, myId }: { model: LeagueModel; myId: number }) {
           <button
             key={w}
             onClick={() => setWeek(w)}
-            className={`rounded px-3 py-1 font-mono ${week === w ? "bg-cyan-400/20 text-cyan-100 shadow-glow" : "text-slate-400 hover:text-slate-100"}`}
+            className={`rounded px-3 py-1 font-mono ${week === w ? "bg-accent font-semibold text-[#ffffff]" : "text-muted hover:bg-hover hover:text-ink"}`}
           >
             {w}
           </button>
         ))}
-        <span className="ml-auto text-xs text-slate-500">
+        <span className="ml-auto text-xs text-muted">
           Your best {pos} this week:{" "}
           {mine ? (
-            <span className="text-slate-200">
+            <span className="text-ink">
               {mine.v.p.name}{" "}
               {mine.exp > 0 ? `(${mine.exp.toFixed(1)})` : model.gameFor(mine.v.p.team, week) ? "(no projection)" : "(on bye or out)"}
             </span>
@@ -258,7 +258,7 @@ function Streamers({ model, myId }: { model: LeagueModel; myId: number }) {
       {!rows.length ? (
         <Empty>No free agents with a game this week at {pos}.</Empty>
       ) : (
-        <div className="-mx-4 overflow-x-auto">
+        <div className="-mx-4 sm:-mx-5 overflow-x-auto">
           <table className="tbl tbl-sticky">
             <thead>
               <tr>
@@ -294,7 +294,7 @@ function Streamers({ model, myId }: { model: LeagueModel; myId: number }) {
                           {g.home ? "vs" : "@"} {g.opp} {pos !== "DEF" && <RankChip rank={d?.rank} />}
                         </span>
                       ) : (
-                        <span className="text-xs text-amber-300">BYE</span>
+                        <span className="text-xs text-warn">BYE</span>
                       )}
                     </td>
                     <td className="font-mono text-xs">
@@ -308,7 +308,7 @@ function Streamers({ model, myId }: { model: LeagueModel; myId: number }) {
           </table>
         </div>
       )}
-      <p className="mt-3 text-xs text-slate-500">
+      <p className="mt-3 text-xs text-muted">
         One-week pickups for byes and injuries, ranked by this week&apos;s projection with matchup and Vegas built in. For defenses, a low opponent
         team total is what you want. Vegas lines usually post a week ahead, so later weeks lean on matchups only.
       </p>
