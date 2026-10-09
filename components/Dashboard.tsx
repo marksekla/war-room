@@ -107,31 +107,64 @@ export default function Dashboard({
         <Stat
           label="Record"
           value={`${me.wins}-${me.losses}${me.ties ? `-${me.ties}` : ""}`}
-          sub={`#${rank} of ${model.teams.length}${myOdds ? ` · ${myOdds.playoffPct}% to make playoffs` : " in standings"}`}
+          valueClass={me.wins > me.losses ? "text-good" : me.wins < me.losses ? "text-bad" : "text-ink"}
+          sub={
+            <>
+              <span className={`font-semibold ${rankTone(rank, model.teams.length)}`}>#{rank}</span> of {model.teams.length}
+              {myOdds ? (
+                <>
+                  {" · "}
+                  <span className={`font-semibold ${pctTone(myOdds.playoffPct, 60, 35)}`}>{myOdds.playoffPct}%</span> to make playoffs
+                </>
+              ) : (
+                " in standings"
+              )}
+            </>
+          }
         />
         <Stat
           label="Points for"
           value={me.pf.toFixed(1)}
-          sub={`#${pfRank} in league`}
+          sub={
+            <>
+              <span className={`font-semibold ${rankTone(pfRank, model.teams.length)}`}>#{pfRank}</span> in league
+            </>
+          }
           tone="violet"
         />
         <Stat
           label={`Week ${model.week} projection`}
           value={lineupNow.total.toFixed(1)}
+          valueClass="text-accentstrong"
           sub={
-            h2h
-              ? `vs ${h2h.opponent.teamName} ${h2h.oppProj.toFixed(1)} · ${h2h.winProb}% to win`
-              : "Best lineup, matchup-adjusted"
+            h2h ? (
+              <>
+                vs {h2h.opponent.teamName} {h2h.oppProj.toFixed(1)}
+                {" · "}
+                <span className={`font-semibold ${pctTone(h2h.winProb, 55, 45)}`}>{h2h.winProb}%</span> to win
+              </>
+            ) : (
+              "Best lineup, matchup-adjusted"
+            )
           }
           tone="lime"
         />
         <Stat
           label="Waiver priority"
           value={me.waiverPosition ?? "-"}
+          valueClass={
+            me.waiverPosition == null
+              ? "text-ink"
+              : rankTone(me.waiverPosition, model.teams.length)
+          }
           sub={
-            myNeeds?.needs.length
-              ? `Biggest need: ${myNeeds.needs.join(", ")}`
-              : "No glaring hole"
+            myNeeds?.needs.length ? (
+              <>
+                Biggest need: <span className="font-semibold text-warn">{myNeeds.needs.join(", ")}</span>
+              </>
+            ) : (
+              <span className="text-good">No glaring hole</span>
+            )
           }
           tone="amber"
         />
@@ -161,7 +194,7 @@ export default function Dashboard({
                     onClick={act}
                     className="group flex w-full items-start gap-3 py-2.5 text-left text-sm text-ink"
                   >
-                    <span className={`-mt-[3px] grid h-7 w-7 shrink-0 place-items-center rounded-md ${chip.cls}`}>
+                    <span className={`mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-md ${chip.cls}`}>
                       <chip.Icon size={15} strokeWidth={2} />
                     </span>
                     <span className="min-w-0 flex-1 leading-snug group-enabled:group-hover:text-accentstrong">{t.text}</span>
@@ -522,6 +555,16 @@ export default function Dashboard({
       </Panel>
     </div>
   );
+}
+
+/** Top third of the league green, middle amber, bottom third red. 1 = best. */
+function rankTone(rank: number, of: number) {
+  return rank <= Math.ceil(of / 3) ? "text-good" : rank > of - Math.ceil(of / 3) ? "text-bad" : "text-warn";
+}
+
+/** Percent at or above `hi` green, at or below `lo` red, in between amber. */
+function pctTone(pct: number, hi: number, lo: number) {
+  return pct >= hi ? "text-good" : pct <= lo ? "text-bad" : "text-warn";
 }
 
 function StrengthCell({ rank, of, pts }: { rank: number; of: number; pts?: number }) {

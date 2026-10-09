@@ -919,14 +919,19 @@ export class LeagueModel {
     const hoursToKick = (kick - now) / 3_600_000;
 
     let p: number;
+    // Ruled out by his team (the official report or a team announcement), or on IR/PUP with no return
+    // before this game: he is not playing, so 0%.
+    let confirmedOut = false;
     const parts: string[] = [];
     if (status && LONG_TERM.has(status)) {
       const back = e?.returnDate ? new Date(e.returnDate).getTime() : null;
       p = back != null && back <= kick ? 0.25 : 0.01;
+      confirmedOut = !(back != null && back <= kick);
       parts.push(`${status === "IR" ? "On injured reserve" : status === "PUP" ? "On PUP" : status === "Sus" ? "Suspended" : "Not active"}`);
     } else if (news?.ruledOut || desig === "Out") {
       const back = e?.returnDate ? new Date(e.returnDate).getTime() : null;
       p = official || news?.ruledOut ? calib.rates.Out?.all ?? 0.003 : back != null && back <= kick ? 0.45 : 0.06;
+      confirmedOut = official || !!news?.ruledOut;
       parts.push(news?.ruledOut ? "Ruled out" : official ? "Officially out" : "Listed out");
     } else if (desig === "Doubtful") {
       p = official ? calib.rates.Doubtful?.[last ?? "all"] ?? calib.rates.Doubtful?.all ?? 0.03 : 0.12;
@@ -969,7 +974,7 @@ export class LeagueModel {
       if (news.gtd) p = 0.5 * p + 0.5 * 0.55;
       if (news.doubtful && !news.questionable) p = Math.min(p, 0.2);
     }
-    p = Math.max(0.01, Math.min(0.99, p));
+    p = confirmedOut ? 0 : Math.max(0.01, Math.min(0.99, p));
     if (injury) parts[0] = `${parts[0] ?? "Injury"} (${injury.toLowerCase()})`;
     if (practice.length) parts.push(practice.map((x) => `${x.st === "DNP" ? "no practice" : x.st === "LP" ? "limited" : "full"} ${x.day === "Latest" ? "on the latest report" : x.day}`).join(", "));
     if (missedLast) parts.push("missed his last game");

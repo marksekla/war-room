@@ -32,8 +32,21 @@ export function Panel({
   );
 }
 
-export function Stat({ label, value, sub, tone = "cyan" }: { label: string; value: React.ReactNode; sub?: React.ReactNode; tone?: "cyan" | "violet" | "lime" | "amber" }) {
+export function Stat({
+  label,
+  value,
+  sub,
+  tone = "cyan",
+  valueClass = "text-ink",
+}: {
+  label: string;
+  value: React.ReactNode;
+  sub?: React.ReactNode;
+  tone?: "cyan" | "violet" | "lime" | "amber";
+  valueClass?: string;
+}) {
   const chip = { cyan: "bg-accenttint text-accent", violet: "bg-purpletint text-purple", lime: "bg-goodtint text-good", amber: "bg-warntint text-warn" };
+  const ink = { cyan: "text-accent", violet: "text-purple", lime: "text-good", amber: "text-warn" };
   const Icon = { cyan: IconListOrdered, violet: IconBarChart, lime: IconTrendUp, amber: IconTarget }[tone];
   return (
     <div className="panel flex items-start gap-3.5 px-4 py-4 sm:px-5">
@@ -41,8 +54,12 @@ export function Stat({ label, value, sub, tone = "cyan" }: { label: string; valu
         <Icon size={20} />
       </div>
       <div className="min-w-0">
-        <div className="tile-label">{label}</div>
-        <div className="mt-0.5 font-display text-[22px] font-semibold leading-tight text-ink">{value}</div>
+        <div className="tile-label flex items-center gap-1.5">
+          {/* Phones skip the big icon tile; a small one in the label keeps the same color cue. */}
+          <Icon size={14} strokeWidth={2} className={`sm:hidden ${ink[tone]}`} />
+          <span className="truncate">{label}</span>
+        </div>
+        <div className={`mt-0.5 font-display text-[22px] font-semibold leading-tight ${valueClass}`}>{value}</div>
         {sub && <div className="mt-1 text-xs leading-snug text-muted">{sub}</div>}
       </div>
     </div>
@@ -134,16 +151,18 @@ export function ChanceRing({ p, size = 48 }: { p: number; size?: number }) {
     <div className="relative shrink-0" style={{ width: size, height: size }} aria-label={`${pct}% chance to play`}>
       <svg width={size} height={size} className="-rotate-90">
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" style={{ stroke: "rgb(var(--t-track))" }} strokeWidth={4} />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={r}
-          fill="none"
-          style={{ stroke: color }}
-          strokeWidth={4}
-          strokeLinecap="round"
-          strokeDasharray={`${(pct / 100) * c} ${c}`}
-        />
+        {pct > 0 && (
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={r}
+            fill="none"
+            style={{ stroke: color }}
+            strokeWidth={4}
+            strokeLinecap="round"
+            strokeDasharray={`${(pct / 100) * c} ${c}`}
+          />
+        )}
       </svg>
       <span className="absolute inset-0 grid place-items-center font-mono text-[11px] font-semibold" style={{ color }}>
         {pct}%
