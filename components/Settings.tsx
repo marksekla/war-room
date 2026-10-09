@@ -1,5 +1,6 @@
 "use client";
 
+import { ThemeToggle } from "./ui";
 import { useState } from "react";
 import { useLeague } from "@/lib/LeagueContext";
 import { DEFAULT_STRATEGY } from "@/lib/agent/strategy";
@@ -63,14 +64,21 @@ export default function Settings({ onClose }: { onClose: () => void }) {
   const nfl = model?.nfl;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4 backdrop-blur-sm" onClick={onClose}>
       <div className="panel panel-corners max-h-[90vh] w-full max-w-2xl overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
         <div className="mb-6 flex items-center justify-between">
-          <h2 className="font-display text-lg font-bold tracking-widest neon-text">SETTINGS</h2>
+          <h2 className="font-display text-lg font-semibold text-ink">Settings</h2>
           <button className="btn btn-ghost" onClick={onClose}>✕</button>
         </div>
 
         <div className="space-y-6">
+          <div className="flex items-center justify-between rounded-xl border border-line bg-sunken px-4 py-3">
+            <div>
+              <div className="hud-title">Appearance</div>
+              <div className="text-xs text-muted">Dark or light, saved on this device.</div>
+            </div>
+            <ThemeToggle label className="btn" />
+          </div>
           <div>
             <div className="hud-title mb-2">AI provider</div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">

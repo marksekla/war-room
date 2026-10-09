@@ -41,7 +41,7 @@ export default function Onboarding({ onOpenSettings }: { onOpenSettings: () => v
     <div className="relative z-10 flex min-h-screen items-center justify-center p-6">
       <div className="w-full max-w-xl">
         <div className="mb-10 flex flex-col items-center text-center">
-          <Brand />
+          <Brand onLight />
           <h1 className="mt-8 font-display text-3xl font-black tracking-wider text-slate-100 md:text-4xl">
             Welcome to the <span className="whitespace-nowrap neon-text">War Room</span>
           </h1>

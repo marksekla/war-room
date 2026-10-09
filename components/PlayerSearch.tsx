@@ -63,7 +63,7 @@ export default function PlayerSearch({ model, compact = false }: { model: League
     );
 
   return (
-    <div ref={box} className={compact ? "absolute inset-x-0 top-full z-30 border-b border-cyan-400/10 bg-[#05060b] px-4 py-2" : "relative w-56 lg:w-72"}>
+    <div ref={box} className={compact ? "absolute inset-x-0 top-full z-30 border-b border-line bg-card px-4 py-2" : "relative w-56 lg:w-72"}>
       <input
         ref={input}
         className="input py-1.5 text-sm"
@@ -84,7 +84,7 @@ export default function PlayerSearch({ model, compact = false }: { model: League
         }}
       />
       {show && results.length > 0 && (
-        <ul className={`${compact ? "mt-2" : "absolute left-0 right-0 top-full mt-1"} z-40 overflow-hidden rounded-lg border border-cyan-400/20 bg-[#0a0e1b] shadow-xl`}>
+        <ul className={`${compact ? "mt-2" : "absolute left-0 right-0 top-full mt-1"} z-40 overflow-hidden rounded-lg border border-line bg-card shadow-xl`}>
           {results.map(({ v }) => (
             <li key={v.p.id}>
               <button

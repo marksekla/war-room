@@ -149,13 +149,13 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
   const showPlay = !!play && (play.p < 0.95 || play.practice.length > 0 || !!v.p.injury);
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-black/60 backdrop-blur-[2px]" onClick={onClose}>
+    <div className="fixed inset-0 z-40 flex justify-end bg-overlay backdrop-blur-[1px]" onClick={onClose}>
       <aside
-        className="h-full w-full overflow-y-auto border-l border-cyan-400/20 bg-[#070912] px-5 pb-[max(2.5rem,env(safe-area-inset-bottom))] shadow-[0_0_40px_rgba(34,228,255,0.15)] sm:w-[460px]"
+        className="h-full w-full overflow-y-auto border-l border-line bg-card px-5 pb-[max(2.5rem,env(safe-area-inset-bottom))] shadow-[0_10px_40px_rgba(15,23,42,0.18)] sm:w-[460px]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="sticky top-0 z-10 -mx-5 mb-4 flex items-start gap-3 border-b border-cyan-400/10 bg-[#070912] px-5 pb-3 pt-[max(1rem,env(safe-area-inset-top))]">
+        <div className="sticky top-0 z-10 -mx-5 mb-4 flex items-start gap-3 border-b border-linesoft bg-card px-5 pb-3 pt-[max(1rem,env(safe-area-inset-top))]">
           <PosTag pos={v.p.pos} />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1 font-display text-lg font-bold text-slate-100">
@@ -340,7 +340,7 @@ function Drawer({ model, v, onClose, onAsk }: { model: LeagueModel; v: PlayerVie
                           <div className="w-full rounded-t bg-cyan-400/60" style={{ height: `${(Math.max(0, r.pts ?? 0) / maxPts) * 100}%` }} />
                           {line != null && (
                             <div
-                              className="absolute inset-x-0 h-0.5 bg-fuchsia-400 shadow-[0_0_6px_#e879f9]"
+                              className="absolute inset-x-0 h-0.5 bg-fuchsia-400"
                               style={{ bottom: `calc(${(Math.max(0, line) / maxPts) * 100}% - 1px)` }}
                             />
                           )}

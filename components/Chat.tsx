@@ -99,7 +99,7 @@ export default function Chat({
   return (
     <div className="flex h-[calc(100dvh-12.5rem)] flex-col md:h-[calc(100vh-11rem)]">
       <div className="mb-3 flex flex-wrap items-center gap-3">
-        <h1 className="font-display text-xl font-bold tracking-widest neon-text">AI AGENT</h1>
+        <h1 className="font-display text-xl font-semibold text-ink">AI Agent</h1>
         <span className="rounded-full border border-fuchsia-400/30 bg-fuchsia-500/10 px-2.5 py-0.5 font-mono text-[11px] text-fuchsia-200">
           {provider.label} · {saved.ai.model || provider.defaultModel || "auto"}
         </span>

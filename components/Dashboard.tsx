@@ -201,8 +201,8 @@ export default function Dashboard({
                   <div
                     className={`w-full rounded-t transition ${
                       playoff
-                        ? "bg-fuchsia-400/70 shadow-[0_0_10px_#e879f9]"
-                        : "bg-cyan-400/60 shadow-[0_0_10px_#22e4ff]"
+                        ? "bg-fuchsia-400/80"
+                        : "bg-cyan-400/70"
                     } ${on ? "ring-2 ring-white/70" : "group-hover:brightness-125"}`}
                     style={{
                       height: `${Math.max(8, ((x.total - floor) / (hi - floor)) * 100)}%`,
@@ -250,7 +250,7 @@ export default function Dashboard({
           </div>
         )}
         <p className="mt-2 text-xs text-slate-500">
-          Amber weeks have starters on bye or hurt. Pink bars are playoff weeks.
+          Amber weeks have starters on bye or hurt. Purple bars are playoff weeks.
         </p>
       </Panel>
 

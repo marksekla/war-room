@@ -186,7 +186,7 @@ export default function DepthCharts({ model, myId }: { model: LeagueModel; myId:
                 {COLS.map((c) => {
                   const list = (pos?.get(c.pos) ?? []).filter((x) => show[x.status]);
                   return (
-                    <div key={c.pos} className="min-w-0 bg-[#0b0f1c] p-2.5">
+                    <div key={c.pos} className="min-w-0 bg-card p-2.5">
                       <div className="hud-title mb-1.5 !text-[10px]">{c.label}</div>
                       {!list.length ? (
                         <div className="px-2 py-1 text-xs text-slate-600">-</div>

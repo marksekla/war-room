@@ -70,7 +70,7 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
       <TradeFinder model={model} myId={myId} locked={locked} onLoad={loadIdea} askAgent={askAgent} />
 
       {/* Pick any two teams: side A defaults to yours. */}
-      <div className="panel flex flex-wrap items-end gap-3 p-4">
+      <div className="panel flex flex-col gap-3 p-4 sm:flex-row sm:flex-wrap sm:items-end">
         <TeamSelect
           label={isMe ? "Your side" : "Team A"}
           value={sideA}
@@ -86,7 +86,7 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
           }}
         />
         <button
-          className="mb-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-cyan-400/25 text-lg text-cyan-200 transition hover:bg-cyan-400/10 hover:shadow-glow"
+          className="mb-0.5 grid h-10 w-10 shrink-0 place-items-center self-center rounded-lg border border-cyan-400/25 text-lg text-cyan-200 transition hover:bg-cyan-400/10 hover:shadow-glow sm:self-auto"
           title="Swap sides"
           aria-label="Swap sides"
           onClick={() => {
@@ -97,7 +97,7 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
             setGet(give);
           }}
         >
-          ⇄
+          <span className="rotate-90 sm:rotate-0">⇄</span>
         </button>
         <TeamSelect
           label="Trade partner"
@@ -109,7 +109,7 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
             setGet([]);
           }}
         />
-        <div className="ml-auto flex items-center gap-2">
+        <div className="flex items-center justify-end gap-2 sm:ml-auto">
           {(give.length > 0 || get.length > 0) && (
             <button
               className="btn btn-ghost"
@@ -219,10 +219,10 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
                 {result.perWeek.map((w) => (
                   <div key={w.week} className="flex h-full flex-1 flex-col items-center" title={`Week ${w.week}: ${w.me > 0 ? "+" : ""}${w.me}`}>
                     <div className="flex h-1/2 w-full items-end">
-                      {w.me > 0 && <div className="w-full rounded-t bg-lime-400/70 shadow-[0_0_8px_#a3ff12]" style={{ height: `${(w.me / maxAbs) * 100}%` }} />}
+                      {w.me > 0 && <div className="w-full rounded-t bg-lime-400/80" style={{ height: `${(w.me / maxAbs) * 100}%` }} />}
                     </div>
                     <div className="flex h-1/2 w-full items-start">
-                      {w.me < 0 && <div className="w-full rounded-b bg-rose-400/70 shadow-[0_0_8px_#ff4d6d]" style={{ height: `${(-w.me / maxAbs) * 100}%` }} />}
+                      {w.me < 0 && <div className="w-full rounded-b bg-rose-400/80" style={{ height: `${(-w.me / maxAbs) * 100}%` }} />}
                     </div>
                     <span className={`font-mono text-[10px] ${w.week >= model.playoffStart ? "text-fuchsia-300" : "text-slate-500"}`}>{w.week}</span>
                   </div>
@@ -366,10 +366,21 @@ function RosterPicker({
               className={`flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition ${on ? sel : "border-transparent hover:bg-white/5"}`}
             >
               <PosTag pos={v.p.pos} />
-              <span className="min-w-0 truncate font-medium text-slate-100">{v.p.name}</span>
-              <span className="hidden text-xs text-slate-500 sm:inline">{v.p.team}</span>
-              <InjuryTag status={v.p.injury} />
-              <span className="ml-auto whitespace-nowrap font-mono text-xs text-slate-400">{label(v)}</span>
+              <span className="flex min-w-0 flex-1 items-center">
+                <span className="min-w-0 truncate font-medium text-slate-100">{v.p.name}</span>
+                <span className="ml-1.5 hidden text-xs text-slate-500 sm:inline">{v.p.team}</span>
+                <InjuryTag status={v.p.injury} />
+              </span>
+              {(() => {
+                // "back W6 · 165 ROS": the return week goes on its own small line so names keep their room on phones.
+                const parts = label(v).split(" · ");
+                return (
+                  <span className="shrink-0 text-right font-mono text-xs leading-tight text-slate-400">
+                    {parts.length > 1 && <span className="block text-[10px] text-amber-300">{parts.slice(0, -1).join(" · ")}</span>}
+                    {parts[parts.length - 1]}
+                  </span>
+                );
+              })()}
               {onLock && (
                 <span
                   role="button"
@@ -572,7 +583,7 @@ function TeamSelect({
   onChange: (id: number) => void;
 }) {
   return (
-    <label className="flex min-w-0 flex-1 flex-col gap-1.5 sm:max-w-sm">
+    <label className="flex w-full min-w-0 flex-col gap-1.5 sm:w-auto sm:max-w-sm sm:flex-1">
       <span className="hud-title">{label}</span>
       <select className="input w-full" value={value} onChange={(e) => onChange(Number(e.target.value))}>
         {teams.map((t) => (

@@ -13,18 +13,18 @@ import DepthCharts from "./DepthCharts";
 import Chat from "./Chat";
 import { PlayerDrawerProvider } from "./PlayerDrawer";
 import PlayerSearch from "./PlayerSearch";
-import { Spinner } from "./ui";
+import { Spinner, ThemeToggle } from "./ui";
 
 export type Tab = "dashboard" | "waivers" | "lineup" | "trades" | "agent" | "health" | "depth";
 
-const NAV: { id: Tab; label: string; short: string; icon: string }[] = [
-  { id: "dashboard", label: "Command", short: "Home", icon: "◈" },
-  { id: "agent", label: "AI Agent", short: "AI", icon: "✦" },
-  { id: "trades", label: "Trades", short: "Trades", icon: "⇄" },
-  { id: "waivers", label: "Waivers", short: "Waivers", icon: "⊕" },
-  { id: "lineup", label: "Start / Sit", short: "Start/Sit", icon: "▤" },
-  { id: "health", label: "Are they playing", short: "Playing?", icon: "✚" },
-  { id: "depth", label: "Depth charts", short: "Depth", icon: "☷" },
+const NAV: { id: Tab; label: string; short: string; icon: string; title: string }[] = [
+  { id: "dashboard", label: "Command", short: "Home", icon: "⌂", title: "Command" },
+  { id: "agent", label: "AI Agent", short: "AI", icon: "✦", title: "AI Agent" },
+  { id: "trades", label: "Trades", short: "Trades", icon: "⇄", title: "Trades" },
+  { id: "waivers", label: "Waivers", short: "Waivers", icon: "⊕", title: "Waivers" },
+  { id: "lineup", label: "Start / Sit", short: "Start/Sit", icon: "☰", title: "Start / Sit" },
+  { id: "health", label: "Are they playing", short: "Playing?", icon: "✚", title: "Are they playing?" },
+  { id: "depth", label: "Depth charts", short: "Depth", icon: "☷", title: "Depth charts" },
 ];
 
 export default function Shell() {
@@ -51,49 +51,65 @@ export default function Shell() {
 
   return (
     <PlayerDrawerProvider model={model} askAgent={askAgent}>
-      <div className="relative z-10 flex min-h-screen">
-        <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-cyan-400/10 bg-black/30 p-4 backdrop-blur md:flex">
-          <Brand />
+      <div className="relative flex min-h-screen bg-page">
+        <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col bg-nav px-3 py-5 md:flex">
+          <div className="px-2">
+            <Brand />
+          </div>
           <nav className="mt-8 flex flex-col gap-1">
             {NAV.map((n) => (
               <button
                 key={n.id}
                 onClick={() => setTab(n.id)}
-                className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${
-                  tab === n.id ? "bg-cyan-400/10 text-cyan-100 shadow-glow" : "text-slate-400 hover:bg-white/5 hover:text-slate-100"
+                className={`group flex items-center gap-3 rounded-xl px-2.5 py-2 text-left text-[14px] font-medium transition ${
+                  tab === n.id ? "bg-navactive text-[#ffffff]" : "text-navtext hover:bg-navhover hover:text-[#ffffff]"
                 }`}
               >
-                <span className={`text-lg ${tab === n.id ? "neon-text" : ""}`}>{n.icon}</span>
-                <span className="font-display text-xs uppercase tracking-[0.16em]">{n.label}</span>
+                <span
+                  className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg text-base ${
+                    tab === n.id ? "bg-[#22c55e] text-[#ffffff]" : "bg-navhover text-navtext group-hover:text-[#ffffff]"
+                  }`}
+                >
+                  {n.icon}
+                </span>
+                <span>{n.label}</span>
               </button>
             ))}
           </nav>
-          <div className="mt-auto">
-            <button className="btn btn-ghost w-full justify-start" onClick={() => setSettingsOpen(true)}>
-              ⚙ Settings & AI key
+          <div className="mt-auto flex flex-col gap-1">
+            <ThemeToggle
+              label
+              className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left text-[14px] font-medium text-navtext transition hover:bg-navhover hover:text-[#ffffff] [&>span:first-child]:grid [&>span:first-child]:h-8 [&>span:first-child]:w-8 [&>span:first-child]:place-items-center [&>span:first-child]:rounded-lg [&>span:first-child]:bg-navhover"
+            />
+            <button
+              className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left text-[14px] font-medium text-navtext transition hover:bg-navhover hover:text-[#ffffff]"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <span className="grid h-8 w-8 place-items-center rounded-lg bg-navhover">⚙</span>
+              Settings & AI key
             </button>
           </div>
         </aside>
 
         <main className="min-w-0 flex-1">
           {/* Mobile header: one compact row */}
-          <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-cyan-400/10 bg-[#05060b]/90 px-4 pb-2.5 pt-[max(0.625rem,env(safe-area-inset-top))] backdrop-blur md:hidden">
+          <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-line bg-card/95 px-4 pb-2.5 pt-[max(0.625rem,env(safe-area-inset-top))] backdrop-blur md:hidden">
             <Brand compact />
             <div className="min-w-0 flex-1">
               {model ? (
                 <select
-                  className="w-full truncate bg-transparent font-display text-sm font-bold text-cyan-200 outline-none"
+                  className="w-full truncate bg-transparent font-display text-sm font-semibold text-ink outline-none"
                   value={saved.rosterId ?? ""}
                   onChange={(e) => setSaved({ rosterId: Number(e.target.value) })}
                 >
                   {model.teams.map((t) => (
-                    <option key={t.rosterId} value={t.rosterId} className="bg-slate-900">
+                    <option key={t.rosterId} value={t.rosterId}>
                       {t.teamName} ({t.ownerName})
                     </option>
                   ))}
                 </select>
               ) : (
-                <div className="font-display text-sm font-bold text-slate-300">Syncing...</div>
+                <div className="font-display text-sm font-semibold text-slate-300">Syncing...</div>
               )}
               <div className="truncate text-[11px] text-slate-500">
                 {model ? `${model.bundle.league.name} · Week ${model.week}` : progress}
@@ -101,14 +117,14 @@ export default function Shell() {
             </div>
             {model && <PlayerSearch model={model} compact />}
             <button
-              className="grid h-9 w-9 place-items-center rounded-lg text-lg text-slate-300 active:bg-white/10"
+              className="grid h-9 w-9 place-items-center rounded-full border border-line text-lg text-slate-300 active:bg-hover"
               onClick={reload}
               aria-label="Sync"
             >
               <span className={loading ? "animate-spin" : ""}>⟳</span>
             </button>
             <button
-              className="grid h-9 w-9 place-items-center rounded-lg text-lg text-slate-300 active:bg-white/10"
+              className="grid h-9 w-9 place-items-center rounded-full border border-line text-lg text-slate-300 active:bg-hover"
               onClick={() => setSettingsOpen(true)}
               aria-label="Settings"
             >
@@ -117,41 +133,37 @@ export default function Shell() {
           </header>
 
           {/* Desktop header */}
-          <header className="sticky top-0 z-20 hidden flex-wrap items-center gap-3 border-b border-cyan-400/10 bg-[#05060b]/80 px-8 py-3 backdrop-blur md:flex">
-            <div className="min-w-0">
-              <div className="hud-title">League</div>
-              <div className="truncate font-display text-sm font-bold text-slate-100">{model?.bundle.league.name ?? "Syncing..."}</div>
-            </div>
-            {model && (
-              <>
-                <div className="h-8 w-px bg-cyan-400/15" />
-                <div>
-                  <div className="hud-title">Your team</div>
+          <header className="sticky top-0 z-20 hidden flex-wrap items-center gap-4 border-b border-line bg-card/95 px-8 py-3 backdrop-blur md:flex">
+            <div className="flex min-w-0 items-center gap-3 rounded-xl border border-line bg-card px-3 py-1.5 shadow-card">
+              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accenttint font-display text-sm font-bold text-accent">
+                {(me?.teamName ?? "W").slice(0, 1).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <div className="max-w-[260px] truncate text-[13px] font-semibold text-ink">{model?.bundle.league.name ?? "Syncing..."}</div>
+                {model ? (
                   <select
-                    className="bg-transparent font-display text-sm font-bold text-cyan-200 outline-none"
+                    className="max-w-[260px] truncate bg-transparent text-[13px] text-muted outline-none"
                     value={saved.rosterId ?? ""}
                     onChange={(e) => setSaved({ rosterId: Number(e.target.value) })}
                   >
                     {model.teams.map((t) => (
-                      <option key={t.rosterId} value={t.rosterId} className="bg-slate-900">
+                      <option key={t.rosterId} value={t.rosterId}>
                         {t.teamName} ({t.ownerName})
                       </option>
                     ))}
                   </select>
-                </div>
-                <div className="h-8 w-px bg-cyan-400/15" />
-                <div>
-                  <div className="hud-title">NFL week</div>
-                  <div className="font-display text-sm font-bold neon-violet">{model.week}</div>
-                </div>
-              </>
+                ) : null}
+              </div>
+            </div>
+            {model && (
+              <div className="rounded-lg border border-line bg-card px-3 py-1.5 text-[13px] font-semibold text-ink">Week {model.week}</div>
             )}
             <div className="ml-auto flex items-center gap-2">
               {model && <PlayerSearch model={model} />}
               {loading ? (
                 <Spinner label={progress || "Syncing"} />
               ) : (
-                <button className="btn btn-ghost" onClick={reload} title="Re-sync league data">
+                <button className="btn" onClick={reload} title="Re-sync league data">
                   ⟳ Sync
                 </button>
               )}
@@ -162,15 +174,15 @@ export default function Shell() {
           </header>
 
           {/* Mobile bottom tab bar */}
-          <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-7 border-t border-cyan-400/15 bg-[#070912]/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
+          <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-7 border-t border-line bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
             {NAV.map((n) => (
               <button
                 key={n.id}
                 onClick={() => setTab(n.id)}
-                className={`flex flex-col items-center gap-0.5 py-2.5 ${tab === n.id ? "text-cyan-200" : "text-slate-500"}`}
+                className={`flex flex-col items-center gap-0.5 py-2.5 ${tab === n.id ? "text-accent" : "text-muted"}`}
               >
-                <span className={`text-xl leading-none ${tab === n.id ? "neon-text" : ""}`}>{n.icon}</span>
-                <span className="font-display text-[8px] uppercase tracking-wide">{n.short}</span>
+                <span className="text-xl leading-none">{n.icon}</span>
+                <span className="text-[9px] font-semibold">{n.short}</span>
               </button>
             ))}
           </nav>
@@ -186,11 +198,12 @@ export default function Shell() {
             )}
             {!model && !error && (
               <div className="flex h-[60vh] items-center justify-center">
-                <Spinner label={progress || "Booting up"} />
+                <Spinner label={progress || "Loading"} />
               </div>
             )}
             {model && me && (
               <>
+                <h1 className="mb-5 hidden font-display text-[26px] font-bold text-ink md:block">{NAV.find((n) => n.id === tab)?.title}</h1>
                 {tab === "dashboard" && <Dashboard model={model} myId={me.rosterId} go={(t) => { setTab(t); window.scrollTo({ top: 0 }); }} />}
                 {tab === "waivers" && <Waivers model={model} myId={me.rosterId} />}
                 {tab === "lineup" && <StartSit model={model} myId={me.rosterId} />}
@@ -216,19 +229,13 @@ export default function Shell() {
   );
 }
 
-export function Brand({ compact = false }: { compact?: boolean }) {
+export function Brand({ compact = false, onLight = false }: { compact?: boolean; onLight?: boolean }) {
   return (
-    <div className="flex items-center gap-3">
-      <div className="relative grid h-9 w-9 place-items-center rounded-lg border border-cyan-300/50 bg-cyan-400/10 shadow-glow">
-        <span className="font-display text-sm font-black neon-text">W</span>
-        <span className="absolute -right-1 -top-1 h-2 w-2 animate-pulseGlow rounded-full bg-fuchsia-400 shadow-[0_0_10px_#e879f9]" />
+    <div className="flex items-center gap-2.5">
+      <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full border-[3px] border-[#f5b301] bg-[#2563eb] font-display text-sm font-bold text-[#ffffff]">
+        W
       </div>
-      {!compact && (
-        <div>
-          <div className="font-display text-sm font-black tracking-[0.2em] text-slate-100">WAR ROOM</div>
-          <div className="font-display text-[10px] tracking-[0.4em] neon-violet">AI · AGENT</div>
-        </div>
-      )}
+      {!compact && <div className={`font-display text-[17px] font-semibold tracking-tight ${onLight ? "text-ink" : "text-[#ffffff]"}`}>War Room</div>}
     </div>
   );
 }
