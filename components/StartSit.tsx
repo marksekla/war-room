@@ -222,7 +222,7 @@ function Compare({ model, myId, week, wx }: { model: LeagueModel; myId: number; 
 
   if (!open)
     return (
-      <button className="btn btn-ghost" onClick={() => setOpen(true)}>
+      <button className="btn" onClick={() => setOpen(true)}>
         ⇆ Compare players
       </button>
     );
