@@ -73,12 +73,12 @@ export default function Settings({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="space-y-6">
-          <div className="flex items-center justify-between rounded-xl border border-line bg-sunken px-4 py-3">
-            <div>
+          <div className="flex items-center gap-4 rounded-xl border border-line bg-sunken px-4 py-4 sm:px-5">
+            <div className="min-w-0 flex-1">
               <div className="hud-title">Appearance</div>
-              <div className="text-xs text-muted">Dark or light, saved on this device.</div>
+              <div className="mt-0.5 text-xs leading-relaxed text-muted">Dark or light, saved on this device.</div>
             </div>
-            <ThemeToggle label className="btn" />
+            <ThemeToggle label className="btn shrink-0" />
           </div>
           <div>
             <div className="hud-title mb-2">AI provider</div>

@@ -22,9 +22,9 @@ export function Panel({
   return (
     <section className={`panel ${corners ? "panel-corners" : ""} ${className}`}>
       {(title || right) && (
-        <header className="flex flex-col gap-2.5 border-b border-linesoft px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-5 sm:py-4">
-          <h2 className="panel-title">{title}</h2>
-          {right && <div className="-mx-1 min-w-0 overflow-x-auto px-1 sm:mx-0 sm:overflow-visible sm:px-0 [&>div]:flex-nowrap">{right}</div>}
+        <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2.5 border-b border-linesoft px-4 py-3.5 sm:px-5 sm:py-4">
+          <h2 className="panel-title min-w-0">{title}</h2>
+          {right && <div className="min-w-0 max-w-full overflow-x-auto [&>div]:flex-nowrap">{right}</div>}
         </header>
       )}
       <div className={`p-4 sm:p-5 ${bodyClassName}`}>{children}</div>

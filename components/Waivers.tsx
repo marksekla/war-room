@@ -101,7 +101,7 @@ function RosWaivers({ model, myId }: { model: LeagueModel; myId: number }) {
           <Empty>No free agents found at this position.</Empty>
         ) : (
           <div className="-mx-4 sm:-mx-5 overflow-x-auto">
-            <table className="tbl tbl-sticky">
+            <table className="tbl">
               <thead>
                 <tr>
                   <th>Player</th>
@@ -259,7 +259,7 @@ function Streamers({ model, myId }: { model: LeagueModel; myId: number }) {
         <Empty>No free agents with a game this week at {pos}.</Empty>
       ) : (
         <div className="-mx-4 sm:-mx-5 overflow-x-auto">
-          <table className="tbl tbl-sticky">
+          <table className="tbl">
             <thead>
               <tr>
                 <th>Player</th>

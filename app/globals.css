@@ -47,6 +47,17 @@ body { font-family: var(--font-body); min-height: 100vh; overflow-x: hidden; -we
   .mhide { @apply hidden sm:table-cell; }
 }
 
+/* One chevron style for every dropdown (iOS otherwise draws its own up/down arrows). */
+select.input {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 2.5rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238b929e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9.5l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.85rem center;
+  background-size: 16px;
+  text-overflow: ellipsis;
+}
 select option { background: rgb(var(--t-card)); color: rgb(var(--t-ink)); }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }

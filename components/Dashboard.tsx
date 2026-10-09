@@ -63,7 +63,7 @@ export default function Dashboard({
       .sort((a, b) => b.pf - a.pf)
       .findIndex((t) => t.rosterId === myId) + 1;
   const h2h = useMemo(() => model.headToHead(myId), [model, myId]);
-  const moves = useMemo(() => model.recentMoves(30), [model]);
+  const moves = useMemo(() => model.recentMoves(15), [model]);
 
   // Weekly outlook: best lineup each week, and which of your usual starters are missing.
   const outlook = useMemo(() => {
@@ -255,7 +255,7 @@ export default function Dashboard({
 
       <Panel title="Roster intel" corners>
         <div className="-mx-4 sm:-mx-5 overflow-x-auto">
-          <table className="tbl tbl-sticky">
+          <table className="tbl">
             <thead>
               <tr>
                 <th>Player</th>

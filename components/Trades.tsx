@@ -6,7 +6,7 @@ import type { Position } from "@/lib/types";
 import { useLeague } from "@/lib/LeagueContext";
 import { Delta, Empty, InjuryTag, Panel, PosTag } from "./ui";
 import { usePlayerDrawer } from "./PlayerDrawer";
-import { IconLock, IconSparkles, IconSwitch, IconUnlock } from "./icons";
+import { IconInfo, IconLock, IconSparkles, IconSwitch, IconUnlock } from "./icons";
 
 const POS_ORDER: Record<string, number> = { QB: 0, RB: 1, WR: 2, TE: 3, K: 4, DEF: 5 };
 
@@ -71,72 +71,9 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
       <TradeFinder model={model} myId={myId} locked={locked} onLoad={loadIdea} askAgent={askAgent} />
 
       {/* Pick any two teams: side A defaults to yours. */}
-      <div className="panel flex flex-col gap-3 p-4 sm:flex-row sm:flex-wrap sm:items-end">
-        <TeamSelect
-          label={isMe ? "Your side" : "Team A"}
-          value={sideA}
-          teams={model.teams}
-          myId={myId}
-          onChange={(id) => {
-            setSideA(id);
-            setGive([]);
-            if (id === partnerId) {
-              setPartnerId(model.teams.find((t) => t.rosterId !== id)?.rosterId ?? 0);
-              setGet([]);
-            }
-          }}
-        />
-        <button
-          className="mb-0.5 grid h-10 w-10 shrink-0 place-items-center self-center rounded-lg border border-line bg-card text-ink2 transition hover:border-accent/50 hover:text-accent sm:self-auto"
-          title="Swap sides"
-          aria-label="Swap sides"
-          onClick={() => {
-            const a = sideA;
-            setSideA(partnerId);
-            setPartnerId(a);
-            setGive(get);
-            setGet(give);
-          }}
-        >
-          <IconSwitch size={18} className="rotate-90 sm:rotate-0" />
-        </button>
-        <TeamSelect
-          label="Trade partner"
-          value={partnerId}
-          teams={others}
-          myId={myId}
-          onChange={(id) => {
-            setPartnerId(id);
-            setGet([]);
-          }}
-        />
-        <div className="flex items-center justify-end gap-2 sm:ml-auto">
-          {(give.length > 0 || get.length > 0) && (
-            <button
-              className="btn btn-ghost"
-              onClick={() => {
-                setGive([]);
-                setGet([]);
-              }}
-            >
-              Clear
-            </button>
-          )}
-          {!isMe && (
-            <button
-              className="btn btn-ghost"
-              onClick={() => {
-                setSideA(myId);
-                setGive([]);
-                if (partnerId === myId) {
-                  setPartnerId(model.teams.find((t) => t.rosterId !== myId)?.rosterId ?? 0);
-                  setGet([]);
-                }
-              }}
-            >
-              Back to my team
-            </button>
-          )}
+      <Panel
+        title="Build a trade"
+        right={
           <div className="flex rounded-lg border border-line bg-card p-0.5 text-xs font-medium" role="group" aria-label="Show points for">
             {(["ros", "week"] as const).map((k) => (
               <button
@@ -149,10 +86,85 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
               </button>
             ))}
           </div>
+        }
+      >
+        <div className="flex flex-col gap-1 sm:grid sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-end sm:gap-4">
+          <TeamSelect
+            label={isMe ? "Your side" : "Team A"}
+            value={sideA}
+            teams={model.teams}
+            myId={myId}
+            onChange={(id) => {
+              setSideA(id);
+              setGive([]);
+              if (id === partnerId) {
+                setPartnerId(model.teams.find((t) => t.rosterId !== id)?.rosterId ?? 0);
+                setGet([]);
+              }
+            }}
+          />
+          <div className="flex items-center gap-3 py-2 sm:py-0">
+            <span className="h-px flex-1 bg-line sm:hidden" />
+            <button
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-line bg-card text-ink2 shadow-card transition hover:border-accent/50 hover:text-accent active:bg-hover sm:h-[42px] sm:w-[42px]"
+              title="Swap sides"
+              aria-label="Swap sides"
+              onClick={() => {
+                const a = sideA;
+                setSideA(partnerId);
+                setPartnerId(a);
+                setGive(get);
+                setGet(give);
+              }}
+            >
+              <IconSwitch size={18} className="rotate-90 sm:rotate-0" />
+            </button>
+            <span className="h-px flex-1 bg-line sm:hidden" />
+          </div>
+          <TeamSelect
+            label="Trade partner"
+            value={partnerId}
+            teams={others}
+            myId={myId}
+            onChange={(id) => {
+              setPartnerId(id);
+              setGet([]);
+            }}
+          />
         </div>
-      </div>
+        {(give.length > 0 || get.length > 0 || !isMe) && (
+          <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t border-linesoft pt-3">
+            {(give.length > 0 || get.length > 0) && (
+              <button
+                className="btn btn-ghost"
+                onClick={() => {
+                  setGive([]);
+                  setGet([]);
+                }}
+              >
+                Clear picks
+              </button>
+            )}
+            {!isMe && (
+              <button
+                className="btn"
+                onClick={() => {
+                  setSideA(myId);
+                  setGive([]);
+                  if (partnerId === myId) {
+                    setPartnerId(model.teams.find((t) => t.rosterId !== myId)?.rosterId ?? 0);
+                    setGet([]);
+                  }
+                }}
+              >
+                Back to my team
+              </button>
+            )}
+          </div>
+        )}
+      </Panel>
 
-      {profile && <p className="-mt-3 text-xs text-muted">{profile.summary}</p>}
+      {profile && <p className="-mt-3 px-1 text-xs leading-relaxed text-muted">{profile.summary}</p>}
 
       <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
         <RosterPicker
@@ -358,14 +370,14 @@ function RosterPicker({
   const { open } = usePlayerDrawer();
   return (
     <Panel title={title}>
-      <div className="max-h-[420px] space-y-1 overflow-y-auto pr-1">
+      <div className="-mx-2 space-y-0.5 sm:mx-0 sm:max-h-[420px] sm:overflow-y-auto sm:pr-1">
         {players.map((v) => {
           const on = selected.includes(v.p.id);
           return (
             <button
               key={v.p.id}
               onClick={() => onToggle(v.p.id)}
-              className={`flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition ${on ? sel : "border-transparent hover:bg-hover"}`}
+              className={`flex w-full items-center gap-2 rounded-lg border px-2 py-2 text-left text-sm transition sm:px-3 ${on ? sel : "border-transparent hover:bg-hover"}`}
             >
               <PosTag pos={v.p.pos} />
               <span className="flex min-w-0 flex-1 items-center">
@@ -399,11 +411,11 @@ function RosterPicker({
                       onLock(v.p.id);
                     }
                   }}
-                  className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border text-[11px] ${
-                    locked?.includes(v.p.id) ? "border-warn/60 text-warn" : "border-line text-faint hover:text-ink2"
+                  className={`grid h-8 w-8 shrink-0 place-items-center rounded-full transition ${
+                    locked?.includes(v.p.id) ? "bg-warn/10 text-warn" : "text-faint hover:bg-hover hover:text-ink2"
                   }`}
                 >
-                  {locked?.includes(v.p.id) ? <IconLock size={13} strokeWidth={2} /> : <IconUnlock size={13} />}
+                  {locked?.includes(v.p.id) ? <IconLock size={16} strokeWidth={2} /> : <IconUnlock size={16} />}
                 </span>
               )}
               <span
@@ -420,9 +432,9 @@ function RosterPicker({
                     open(v.p.id);
                   }
                 }}
-                className="grid h-6 w-6 shrink-0 place-items-center rounded-full border border-line text-[11px] text-muted hover:border-accent/50 hover:text-accentstrong"
+                className="-mr-1 grid h-8 w-8 shrink-0 place-items-center rounded-full text-muted transition hover:bg-hover hover:text-accent"
               >
-                i
+                <IconInfo size={17} />
               </span>
             </button>
           );
@@ -498,20 +510,22 @@ function TradeFinder({
         )
       }
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm text-muted">Find me</span>
-        <div className="flex rounded-lg border border-line bg-card p-0.5 text-xs font-medium">
-          {NEEDS.map((n) => (
-            <button
-              key={n}
-              onClick={() => setNeed(n)}
-              className={`rounded-md px-2.5 py-1 ${need === n ? "bg-accent font-semibold text-[#ffffff]" : "text-muted hover:text-ink"}`}
-            >
-              {n === "ANY" ? "Any upgrade" : n}
-            </button>
-          ))}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="flex min-w-0 flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2.5">
+          <span className="text-[13px] font-medium text-muted">Find me</span>
+          <div className="flex rounded-lg border border-line bg-card p-0.5 text-xs font-medium">
+            {NEEDS.map((n) => (
+              <button
+                key={n}
+                onClick={() => setNeed(n)}
+                className={`${n === "ANY" ? "flex-[2]" : "flex-1"} whitespace-nowrap rounded-md px-2.5 py-1.5 text-center sm:flex-none sm:py-1 ${need === n ? "bg-accent font-semibold text-[#ffffff]" : "text-muted hover:text-ink"}`}
+              >
+                {n === "ANY" ? "Any upgrade" : n}
+              </button>
+            ))}
+          </div>
         </div>
-        <button className="btn ml-auto" onClick={scan} disabled={progress != null}>
+        <button className="btn btn-primary w-full py-2.5 sm:ml-auto sm:w-auto sm:py-[7px]" onClick={scan} disabled={progress != null}>
           {progress != null ? `Scanning ${Math.round(progress * 100)}%` : "Scan the league"}
         </button>
       </div>
@@ -586,16 +600,18 @@ function TeamSelect({
   onChange: (id: number) => void;
 }) {
   return (
-    <label className="flex w-full min-w-0 flex-col gap-1.5 sm:w-auto sm:max-w-sm sm:flex-1">
-      <span className="hud-title">{label}</span>
-      <select className="input w-full" value={value} onChange={(e) => onChange(Number(e.target.value))}>
+    <label className="flex w-full min-w-0 flex-col gap-1.5">
+      <span className="text-[13px] font-medium text-muted">{label}</span>
+      <span className="relative block">
+        <select className="input h-[42px] w-full cursor-pointer truncate py-0" value={value} onChange={(e) => onChange(Number(e.target.value))}>
         {teams.map((t) => (
           <option key={t.rosterId} value={t.rosterId} className="bg-card">
             {t.teamName} ({t.ownerName}) {t.wins}-{t.losses}
             {t.rosterId === myId ? " · you" : ""}
           </option>
         ))}
-      </select>
+        </select>
+      </span>
     </label>
   );
 }
