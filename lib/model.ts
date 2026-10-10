@@ -894,7 +894,7 @@ export class LeagueModel {
     if (log && log.w === this.week && gsis && log.p[gsis]) for (const [d, st] of Object.entries(log.p[gsis])) days.set(d, st);
     const eDate = e?.date ? new Date(e.date).getTime() : 0;
     const fresh = e && eDate > prevKick && now - eDate < 8 * 86_400_000;
-    const news = fresh && e?.short ? parseInjuryNote(e.short) : null;
+    const news = fresh && e?.short ? parseInjuryNote(e.short, v.p.name) : null;
     if (news) for (const d of news.days) days.set(d.day, d.st);
     const pr = v.adv?.prac;
     const prThisWeek = pr && pr.w === this.week ? pr : null;
@@ -2609,7 +2609,37 @@ export function practiceDayHappened(day: string, kick: number, now: number): boo
   return true;
 }
 
-export function parseInjuryNote(text: string) {
+/**
+ * Keep only the parts of a news note that are about this player. Notes often mention teammates
+ * ("Harris' workload should grow, as Quentin Johnston (chest) has been ruled out"), and those
+ * clauses must not be read as news about him.
+ */
+function aboutPlayer(sentence: string, name?: string): string {
+  if (!name) return sentence;
+  const parts = name.replace(/\b(Jr|Sr|II|III|IV|V)\.?$/i, "").trim().split(/\s+/);
+  const last = (parts[parts.length - 1] ?? "").replace(/[^A-Za-z]/g, "").toLowerCase();
+  const first = (parts[0] ?? "").replace(/[^A-Za-z]/g, "").toLowerCase();
+  // Commas inside "(foot, questionable)" aren't clause breaks.
+  const safe = sentence.replace(/\(([^)]*)\)/g, (m) => m.replace(/,/g, " /"));
+  const clauses = safe.split(/,\s*|;\s*|\s+(?=(?:as|so|while|but|and|since|because|with|after|meaning)\s)/);
+  const kept = clauses.filter((c) => {
+    // A clause naming another player in the "Name (injury)" style, or led by another player's name, is about him.
+    for (const m of c.matchAll(/\b([A-Z][A-Za-z'.-]+)(?:\s+(?:Jr\.|Sr\.|II|III))?\s*\(([^)]{2,40})\)/g)) {
+      const who = m[1].replace(/[^A-Za-z]/g, "").toLowerCase();
+      if (who !== last && who !== first) return false;
+    }
+    const lead = c.match(/^(?:as|so|while|but|and|since|because|with|after|meaning)?\s*([A-Z][a-z'.-]+)\s+([A-Z][A-Za-z'.-]+)\s/);
+    if (lead) {
+      const a = lead[1].replace(/[^A-Za-z]/g, "").toLowerCase();
+      const b = lead[2].replace(/[^A-Za-z]/g, "").toLowerCase();
+      if (b !== last && a !== first && a !== last) return false;
+    }
+    return true;
+  });
+  return kept.join(", ");
+}
+
+export function parseInjuryNote(text: string, name?: string) {
   const out = {
     days: [] as { day: string; st: "DNP" | "LP" | "FP" }[],
     ruledOut: false,
@@ -2621,7 +2651,8 @@ export function parseInjuryNote(text: string) {
   };
   const t = text.replace(/\s+/g, " ");
   for (const sentence of t.split(/(?<=[.!?])\s+/)) {
-    const s = sentence.toLowerCase();
+    const s = aboutPlayer(sentence, name).toLowerCase();
+    if (!s.trim()) continue;
     let st: "DNP" | "LP" | "FP" | null = null;
     // "Isn't expected to practice Thursday" / "will be limited Friday" predict a practice, they don't report one.
     const future = /\b(expected to|set to|slated to|will|won't|plans to|planning to|likely to|could|may|might|hopes to|hoping to|going to|projected to)\s+(\w+\s+){0,2}(practice|practicing|be limited|participate|work out|return to practice|sit out)/.test(s);
@@ -2640,7 +2671,7 @@ export function parseInjuryNote(text: string) {
     const inGame = /\b(remainder of|rest of (the|sunday's|monday's|thursday's|saturday's|that) (game|contest)|did not return|didn't return|was forced out|exited)\b/.test(s);
     const hedged = inGame || /\b(could|may|might|likely|probably|possibly|expected to|in danger of|at risk of|risk|trending toward|would|if|unless|chance|appears|seems)\b[^.]{0,30}\b(ruled out|miss|sit|out for)\b/.test(s);
     const ruling =
-      /\b(has been ruled out|have ruled|was ruled out|is ruled out|officially ruled out|been ruled out|ruled him out|ruled out for|ruled out of (sunday|monday|thursday|saturday|the game|week|his)|downgraded to out|won't play|will not play|won't suit up|will not suit up|is out for|inactive for|placed on (injured reserve|ir)|out for (sunday|monday|thursday|saturday|the game|week))\b/.test(s) ||
+      /\b(will deactivate him|deactivated|is inactive|was declared inactive|declared inactive|listed as inactive|will be deactivated|will be inactive|won't be active|will not be active|won't dress|will not dress|has been suspended|won't travel|will not travel|excused from (sunday's|monday's|thursday's|saturday's|the) game|has been ruled out|have ruled|was ruled out|is ruled out|officially ruled out|been ruled out|ruled him out|ruled out for|ruled out of (sunday|monday|thursday|saturday|the game|week|his)|downgraded to out|won't play|will not play|won't suit up|will not suit up|is out for|inactive for|placed on (injured reserve|ir)|out for (sunday|monday|thursday|saturday|the game|week))\b/.test(s) ||
       /\b(will miss|is set to miss|is going to miss)\s+(sunday's|monday's|thursday's|saturday's|the|this|week|his team's|the team's)\s*(\w+\s+){0,2}(game|contest|matchup|week|tilt)/.test(s);
     if (ruling && !hedged && !/(not|n't)\s+(yet\s+)?(been\s+)?ruled (him\s+)?out/.test(s)) out.ruledOut = true;
     else if (/\b(likely|probably|expected to be|trending toward being)\s+(to\s+)?(be\s+)?(ruled out|out|inactive|miss)\b/.test(s)) out.doubtful = true;
