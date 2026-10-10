@@ -5,26 +5,36 @@ import type { LeagueModel } from "@/lib/model";
 import type { Position } from "@/lib/types";
 import { Delta, Empty, InjuryTag, Meter, Panel, PosTag, RankChip } from "./ui";
 import { PlayerName } from "./PlayerDrawer";
+import CheatSheet from "./CheatSheet";
 
 const FILTERS: (Position | "ALL")[] = ["ALL", "RB", "WR", "TE", "QB", "K", "DEF"];
 const STREAM_POS: Position[] = ["QB", "TE", "K", "DEF"];
 
 export default function Waivers({ model, myId }: { model: LeagueModel; myId: number }) {
-  const [mode, setMode] = useState<"ros" | "stream">("ros");
+  const [mode, setMode] = useState<"ros" | "stream" | "sheet">("ros");
   return (
     <div className="space-y-6">
       <div className="flex rounded-lg border border-line bg-card p-0.5 text-xs font-medium sm:w-fit">
-        {(["ros", "stream"] as const).map((k) => (
+        {(["ros", "stream", "sheet"] as const).map((k) => (
           <button
             key={k}
             onClick={() => setMode(k)}
             className={`flex-1 rounded-md px-3 py-1.5 sm:flex-none ${mode === k ? "bg-accent font-semibold text-[#ffffff]" : "text-muted hover:text-ink"}`}
           >
-            {k === "ros" ? "Rest of season" : "Streamers (one week)"}
+            {k === "ros" ? (
+              "Rest of season"
+            ) : k === "stream" ? (
+              <>
+                <span className="sm:hidden">Streamers</span>
+                <span className="hidden sm:inline">Streamers (one week)</span>
+              </>
+            ) : (
+              "Cheat sheet"
+            )}
           </button>
         ))}
       </div>
-      {mode === "ros" ? <RosWaivers model={model} myId={myId} /> : <Streamers model={model} myId={myId} />}
+      {mode === "ros" ? <RosWaivers model={model} myId={myId} /> : mode === "stream" ? <Streamers model={model} myId={myId} /> : <CheatSheet model={model} myId={myId} />}
     </div>
   );
 }
