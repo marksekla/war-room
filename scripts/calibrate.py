@@ -23,7 +23,7 @@ import pandas as pd
 NFLVERSE = "https://github.com/nflverse/nflverse-data/releases/download"
 FFOPP = "https://github.com/ffverse/ffopportunity/releases/download/latest-data"
 POS = ["QB", "RB", "WR", "TE"]
-VERSION = 6
+VERSION = 7
 # FantasyPros' free pages only list each position's top 10, too few to learn a weight from, so the
 # app gives FantasyPros an even share instead. Flip on if a full feed becomes available.
 FP_HISTORY = False
@@ -351,7 +351,9 @@ def injury_group(s) -> str:
     return "upper" if s and s != "nan" else "none"
 
 
-PLAY_FEATS = ["dnp", "fp", "prevOut", "soft", "lower", "concussion", "nonInjury", "QB", "RB", "TE"]
+# Picked by leave-one-season-out testing on 2019-2025 (log loss 0.545 -> 0.531 on Questionable players):
+# recent snap share and the team's own history of how often its Questionable players suit up both help.
+PLAY_FEATS = ["dnp", "fp", "prevOut", "soft", "lower", "concussion", "nonInjury", "QB", "role", "dnpSoft", "team"]
 
 
 def logistic(X: np.ndarray, y: np.ndarray, l2: float = 2.0, iters: int = 50) -> np.ndarray:
@@ -411,7 +413,7 @@ def play_model(seasons: list[int], ids: pd.DataFrame) -> dict | None:
                 "ps": short.get(r.practice_status, "LP") if isinstance(r.practice_status, str) else "LP",
                 "prevOut": bool(pw and pw[0] == r.week - 1 and not pw[1]),
                 "grp": injury_group(r.report_primary_injury if isinstance(r.report_primary_injury, str) else r.practice_primary_injury),
-                "pos": r.position, "y": 1.0 if ok else 0.0,
+                "pos": r.position, "team": r.team, "role": role.get((r.gsis_id, r.week), 0.0), "y": 1.0 if ok else 0.0,
             })
             last[r.gsis_id] = (r.week, ok)
     if len(rows) < 500:
@@ -427,12 +429,20 @@ def play_model(seasons: list[int], ids: pd.DataFrame) -> dict | None:
     # Questionable is where the real uncertainty is: fit a small logistic model on it.
     q = d[d.rs == "Questionable"]
     if len(q) >= 300:
+        # Team tendency: how often each team's Questionable players end up playing, shrunk toward the league.
+        m = float(q.y.mean())
+        team_q = {}
+        for t, g in q.groupby("team"):
+            r = (g.y.sum() + 40 * m) / (len(g) + 40)
+            team_q[t] = round(float(np.log(r / (1 - r)) - np.log(m / (1 - m))), 3)
         X = np.column_stack([np.ones(len(q))] + [
             (q.ps == "DNP"), (q.ps == "FP"), q.prevOut, q.grp == "soft", q.grp == "lower", q.grp == "concussion",
-            q.grp == "nonInjury", q.pos == "QB", q.pos == "RB", q.pos == "TE",
+            q.grp == "nonInjury", q.pos == "QB", q.role.clip(0.4, 1.0) - 0.7, (q.ps == "DNP") & (q.grp == "soft"),
+            q.team.map(team_q).fillna(0.0),
         ]).astype(float)
         w = logistic(X, q.y.to_numpy())
         out["q"] = {"intercept": round(float(w[0]), 3), **{f: round(float(c), 3) for f, c in zip(PLAY_FEATS, w[1:])}}
+        out["teamQ"] = team_q
         p = 1 / (1 + np.exp(-(X @ w)))
         out["qBrier"] = round(float(np.mean((p - q.y.to_numpy()) ** 2)), 3)
     log(f"  calib: play model n={out['n']} rates={out['rates']} q={out.get('q')}")
@@ -527,7 +537,7 @@ def calibrate(season: int, max_week: int, ids: pd.DataFrame, games: pd.DataFrame
     out["ecr"] = ecr_weight(data, ecr_history or {}, ids)
     # 7) Chance to play from injury designations + practice reports (last 3 seasons + this one).
     try:
-        out["play"] = play_model([season - 3, season - 2, season - 1, season], ids)
+        out["play"] = play_model(list(range(season - 6, season + 1)), ids)
     except Exception as e:  # noqa: BLE001
         log(f"  calib: play model failed ({e.__class__.__name__}: {e})")
         out["play"] = (prev or {}).get("play")

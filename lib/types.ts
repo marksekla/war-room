@@ -242,6 +242,7 @@ export interface PlayCalib {
   n: number;
   rates: Record<string, Record<string, number>>; // designation -> practice (DNP/LP/FP/all) -> share who played
   q?: Record<string, number>; // logistic coefficients for Questionable players
+  teamQ?: Record<string, number>; // each team's tendency to play its Questionable players (logit offset)
   qBrier?: number;
 }
 

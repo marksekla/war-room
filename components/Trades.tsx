@@ -103,7 +103,7 @@ export default function Trades({ model, myId, askAgent }: { model: LeagueModel; 
               }
             }}
           />
-          <div className="flex items-center gap-3 py-2 sm:py-0">
+          <div className="flex items-center gap-3 pb-[7px] pt-3 sm:p-0">
             <span className="h-px flex-1 bg-line sm:hidden" />
             <button
               className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-line bg-card text-ink2 shadow-card transition hover:border-accent/50 hover:text-accent active:bg-hover sm:h-[42px] sm:w-[42px]"

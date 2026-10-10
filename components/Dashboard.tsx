@@ -259,7 +259,7 @@ export default function Dashboard({
               {picked.total.toFixed(1)} pts
             </span>
             {picked.week >= model.playoffStart && (
-              <span className="ml-2 text-xs text-purple">playoffs</span>
+              <span className="ml-2 text-xs text-purple">Playoffs</span>
             )}
             <div className="mt-1 text-xs text-muted">
               {picked.missing.length || picked.weak.length ? (

@@ -940,14 +940,21 @@ export class LeagueModel {
       p = 0.96;
       parts.push("Rest or personal day, not an injury");
     } else if (desig === "Questionable" || (last && last !== "FP") || (missedLast && !!injury)) {
-      const q = calib.q ?? DEFAULT_PLAY.q!;
+      // Use the build's fit once it has the newer features (snap share, team tendency); until then the built-in one.
+      const fitted = calib.q?.role != null ? calib : DEFAULT_PLAY;
+      const q = fitted.q!;
+      const teamQ = fitted.teamQ ?? DEFAULT_PLAY.teamQ ?? {};
       const grp = injuryGroup(injury);
+      const role = Math.min(1, Math.max(0.4, v.adv?.l3?.snap ?? v.snapShare ?? 0.7));
       let z =
         q.intercept +
         (last === "DNP" ? q.dnp : last === "FP" ? q.fp : 0) +
         (missedLast ? q.prevOut : 0) +
         (q[grp] ?? 0) +
-        (v.p.pos === "QB" || v.p.pos === "RB" || v.p.pos === "TE" ? q[v.p.pos] ?? 0 : 0);
+        (q[v.p.pos] ?? 0) +
+        (q.role ?? 0) * (role - 0.7) +
+        (last === "DNP" && grp === "soft" ? q.dnpSoft ?? 0 : 0) +
+        (q.team ?? 0) * (teamQ[v.p.team ?? ""] ?? 0);
       if (desig !== "Questionable") {
         // No designation (yet). After the final report that usually means he's fine.
         if (official) z = logit(calib.rates.None?.[last ?? "all"] ?? 0.97);
@@ -2535,15 +2542,21 @@ function normCdf(z: number) {
 }
 
 /** Fallback chance-to-play model (fit on 2023-26 injury reports) until the nightly calibration ships one. */
+// Fallback until the data build has its own fit: learned from 2019-2025 official reports (players with a real role).
 const DEFAULT_PLAY: PlayCalib = {
-  n: 3252,
+  n: 7313,
   rates: {
-    Out: { all: 0.002, DNP: 0, LP: 0, FP: 0.001 },
-    Doubtful: { all: 0.021, DNP: 0.003, LP: 0.037, FP: 0.011 },
-    Questionable: { all: 0.677, DNP: 0.517, LP: 0.67, FP: 0.865 },
-    None: { all: 0.967, DNP: 0.84, LP: 0.979, FP: 0.977 },
+    Out: { all: 0.002, DNP: 0, LP: 0.009, FP: 0.001 },
+    Doubtful: { all: 0.015, DNP: 0.008, LP: 0.021, FP: 0.007 },
+    Questionable: { all: 0.71, DNP: 0.494, LP: 0.729, FP: 0.871 },
+    None: { all: 0.962, DNP: 0.826, LP: 0.974, FP: 0.976 },
   },
-  q: { intercept: 1.078, dnp: -0.863, fp: 1.204, prevOut: -0.634, soft: -0.369, lower: 0.107, concussion: -0.387, nonInjury: 0.105, QB: -1.265, RB: 0.082, TE: 0.084 },
+  q: { intercept: 1.509, dnp: -1.231, fp: 0.985, prevOut: -0.624, soft: -0.106, lower: -0.092, concussion: -0.556, nonInjury: 0.35, QB: -1.669, role: 1.695, dnpSoft: -0.413, team: 1.541 },
+  teamQ: {
+    ARI: 0.06, ATL: -0.263, BAL: 0.162, BUF: -0.46, CAR: 0.122, CHI: 0.308, CIN: 0.178, CLE: -0.201, DAL: -0.164, DEN: 0.353, DET: 0.359,
+    GB: -0.093, HOU: -0.406, IND: 0.329, JAX: -0.023, KC: -0.199, LAC: 0.039, LAR: 0.069, LV: -0.297, MIA: -0.527, MIN: -0.154, NE: 0.223,
+    NO: -0.046, NYG: 0.476, NYJ: 0.264, PHI: -0.747, PIT: -0.096, SEA: 0.002, SF: 0.034, TB: 0.559, TEN: -0.114, WAS: 0.125,
+  },
 };
 
 const DAY_ORDER = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun", "Latest"];
@@ -2617,8 +2630,14 @@ export function parseInjuryNote(text: string) {
       const m = s.match(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/);
       out.days.push({ day: m ? WEEKDAY[m[1]] : "Latest", st });
     }
-    if (/\b(ruled out|won't play|will not play|will miss|won't suit up|is out for|has been ruled|inactive for|placed on (injured reserve|ir)|out for (sunday|monday|thursday|saturday))\b/.test(s) && !/\bnot (been )?ruled out\b/.test(s))
-      out.ruledOut = true;
+    // A team ruling, not a guess: "has been ruled out", "won't play Sunday", "downgraded to out". Hedged talk
+    // ("could be ruled out", "likely to miss", "will miss practice") is not a ruling.
+    const hedged = /\b(could|may|might|likely|probably|possibly|expected to|in danger of|at risk of|risk|trending toward|would|if|unless|chance|appears|seems)\b[^.]{0,30}\b(ruled out|miss|sit|out for)\b/.test(s);
+    const ruling =
+      /\b(has been ruled out|have ruled|was ruled out|is ruled out|officially ruled out|been ruled out|ruled him out|ruled out for|ruled out of (sunday|monday|thursday|saturday|the game|week|his)|downgraded to out|won't play|will not play|won't suit up|will not suit up|is out for|inactive for|placed on (injured reserve|ir)|out for (sunday|monday|thursday|saturday|the game|week))\b/.test(s) ||
+      /\b(will miss|is set to miss|is going to miss)\s+(sunday's|monday's|thursday's|saturday's|the|this|week|his team's|the team's)\s*(\w+\s+){0,2}(game|contest|matchup|week|tilt)/.test(s);
+    if (ruling && !hedged && !/(not|n't)\s+(yet\s+)?(been\s+)?ruled (him\s+)?out/.test(s)) out.ruledOut = true;
+    else if (/\b(likely|probably|expected to be|trending toward being)\s+(to\s+)?(be\s+)?(ruled out|out|inactive|miss)\b/.test(s)) out.doubtful = true;
     const negated = /\b(not|n't|isn't|unlikely)\s+(expected|likely|going|set)\s+to\s+(play|suit up|go)\b|\bunlikely to play\b/.test(s);
     if (negated) out.doubtful = true;
     else if (/(expected to play|will play|on track to play|good to go|has been cleared|will suit up|plans to play|is active|no injury designation|without an injury designation|removed from the injury report|not listed on the injury report|off the injury report)/.test(s))
