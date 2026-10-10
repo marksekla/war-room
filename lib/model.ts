@@ -905,7 +905,7 @@ export class LeagueModel {
       const saved = this.nfl?.officialDays?.w === this.week ? this.nfl.officialDays.t[off.team] : null;
       const d = labelReport(off.team, off.fp, kick, now, saved);
       if (d) days.set(d, off.practice);
-      else if (!days.size) days.set("Latest", off.practice);
+      else if (![...days.keys()].some((k) => practiceDayHappened(k, kick, now))) days.set("Latest", off.practice);
     }
     // A practice can't be reported before it happens: drop any day later than what's possible right now.
     for (const d of [...days.keys()]) if (!practiceDayHappened(d, kick, now)) days.delete(d);
@@ -914,8 +914,13 @@ export class LeagueModel {
     const last = practice.length ? practice[practice.length - 1].st : null;
 
     // Is the final game-status report out? (nflverse game status, or ESPN noting the designation.)
-    const official = !!off?.game || !!(prThisWeek?.rep) || !!(news && (news.listed || news.ruledOut) && kick - eDate < 3 * 86_400_000);
-    const desig = off?.game ?? prThisWeek?.rep ?? (news?.ruledOut ? "Out" : status);
+    // A news "ruled out" only counts when the team's own report doesn't say otherwise. Once the official
+    // report lists him Questionable or Doubtful, only an explicit downgrade in the news overrides it (the
+    // report itself also flips to Out when a team downgrades him).
+    const reportDesig = off?.game ?? prThisWeek?.rep ?? null;
+    const newsOut = !!news?.ruledOut && (!reportDesig || reportDesig === "Out" || /downgraded to out|downgraded .{0,20}\bout\b/i.test(e?.short ?? ""));
+    const official = !!off?.game || !!(prThisWeek?.rep) || !!(news && (news.listed || newsOut) && kick - eDate < 3 * 86_400_000);
+    const desig = newsOut ? "Out" : off?.game ?? prThisWeek?.rep ?? status;
     const hoursToKick = (kick - now) / 3_600_000;
 
     let p: number;
@@ -928,11 +933,11 @@ export class LeagueModel {
       p = back != null && back <= kick ? 0.25 : 0.01;
       confirmedOut = !(back != null && back <= kick);
       parts.push(`${status === "IR" ? "On injured reserve" : status === "PUP" ? "On PUP" : status === "Sus" ? "Suspended" : "Not active"}`);
-    } else if (news?.ruledOut || desig === "Out") {
+    } else if (newsOut || desig === "Out") {
       const back = e?.returnDate ? new Date(e.returnDate).getTime() : null;
-      p = official || news?.ruledOut ? calib.rates.Out?.all ?? 0.003 : back != null && back <= kick ? 0.45 : 0.06;
-      confirmedOut = official || !!news?.ruledOut;
-      parts.push(news?.ruledOut ? "Ruled out" : official ? "Officially out" : "Listed out");
+      p = official || newsOut ? calib.rates.Out?.all ?? 0.003 : back != null && back <= kick ? 0.45 : 0.06;
+      confirmedOut = official || newsOut;
+      parts.push(newsOut ? "Ruled out" : official ? "Officially out" : "Listed out");
     } else if (desig === "Doubtful") {
       p = official ? calib.rates.Doubtful?.[last ?? "all"] ?? calib.rates.Doubtful?.all ?? 0.03 : 0.12;
       parts.push("Doubtful");
@@ -2632,7 +2637,8 @@ export function parseInjuryNote(text: string) {
     }
     // A team ruling, not a guess: "has been ruled out", "won't play Sunday", "downgraded to out". Hedged talk
     // ("could be ruled out", "likely to miss", "will miss practice") is not a ruling.
-    const hedged = /\b(could|may|might|likely|probably|possibly|expected to|in danger of|at risk of|risk|trending toward|would|if|unless|chance|appears|seems)\b[^.]{0,30}\b(ruled out|miss|sit|out for)\b/.test(s);
+    const inGame = /\b(remainder of|rest of (the|sunday's|monday's|thursday's|saturday's|that) (game|contest)|did not return|didn't return|was forced out|exited)\b/.test(s);
+    const hedged = inGame || /\b(could|may|might|likely|probably|possibly|expected to|in danger of|at risk of|risk|trending toward|would|if|unless|chance|appears|seems)\b[^.]{0,30}\b(ruled out|miss|sit|out for)\b/.test(s);
     const ruling =
       /\b(has been ruled out|have ruled|was ruled out|is ruled out|officially ruled out|been ruled out|ruled him out|ruled out for|ruled out of (sunday|monday|thursday|saturday|the game|week|his)|downgraded to out|won't play|will not play|won't suit up|will not suit up|is out for|inactive for|placed on (injured reserve|ir)|out for (sunday|monday|thursday|saturday|the game|week))\b/.test(s) ||
       /\b(will miss|is set to miss|is going to miss)\s+(sunday's|monday's|thursday's|saturday's|the|this|week|his team's|the team's)\s*(\w+\s+){0,2}(game|contest|matchup|week|tilt)/.test(s);
