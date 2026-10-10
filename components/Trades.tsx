@@ -540,25 +540,57 @@ function TradeFinder({
             const r = i.result;
             const partner = model.team(i.partnerId);
             return (
-              <li key={k} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
+              <li key={k} className="flex flex-col gap-3 py-4 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-2 sm:py-3">
                 <div className="min-w-0 flex-1 text-sm">
-                  <div className="text-ink">
+                  {/* Phones: give / get on their own lines */}
+                  <div className="space-y-1 sm:hidden">
+                    <div className="flex gap-2">
+                      <span className="w-9 shrink-0 pt-px text-[11px] font-semibold uppercase tracking-wide text-muted">Give</span>
+                      <span className="min-w-0 font-medium text-bad">{i.give.map(name).join(", ")}</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <span className="w-9 shrink-0 pt-px text-[11px] font-semibold uppercase tracking-wide text-muted">Get</span>
+                      <span className="min-w-0 font-medium text-good">{i.get.map(name).join(", ")}</span>
+                    </div>
+                  </div>
+                  <div className="hidden text-ink sm:block">
                     <span className="text-bad">{i.give.map(name).join(" + ")}</span>
                     <span className="mx-2 text-muted">for</span>
                     <span className="text-good">{i.get.map(name).join(" + ")}</span>
                   </div>
-                  <div className="mt-0.5 text-xs text-muted">
+                  {/* Phones: the details as small chips */}
+                  <div className="mt-2.5 sm:hidden">
+                    <div className="text-xs text-muted">with {partner?.teamName}</div>
+                    <div className="mt-1.5 flex flex-wrap gap-1.5 text-[11px]">
+                      <span className="rounded-md bg-sunken px-2 py-1 text-ink2 ring-1 ring-inset ring-line">
+                        <Delta value={r.perWeekAvg} suffix="/wk" />
+                      </span>
+                      <span className="rounded-md bg-sunken px-2 py-1 text-ink2 ring-1 ring-inset ring-line">
+                        Playoffs <Delta value={r.myPlayoffDelta} />
+                      </span>
+                      <span className="rounded-md bg-sunken px-2 py-1 text-ink2 ring-1 ring-inset ring-line">{r.acceptance} to accept</span>
+                      {r.theirPerWeekAvg > 0.2 && (
+                        <span className="rounded-md bg-sunken px-2 py-1 text-ink2 ring-1 ring-inset ring-line">Helps them +{r.theirPerWeekAvg.toFixed(1)}/wk</span>
+                      )}
+                      {r.consensusRatio != null && (
+                        <span className="rounded-md bg-sunken px-2 py-1 text-ink2 ring-1 ring-inset ring-line">
+                          {r.consensusRatio <= 1.08 && r.consensusRatio >= 0.92 ? "Fair value" : r.consensusRatio > 1.08 ? "You pay a bit more" : "You get a bit more"}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="mt-0.5 hidden text-xs text-muted sm:block">
                     {partner?.teamName} · <Delta value={r.perWeekAvg} suffix="/wk" /> · playoffs <Delta value={r.myPlayoffDelta} /> · {r.acceptance} to accept
                     {r.theirPerWeekAvg > 0.2 ? ` · helps them too (+${r.theirPerWeekAvg.toFixed(1)}/wk)` : ""}
                     {r.consensusRatio != null ? ` · ${r.consensusRatio <= 1.08 && r.consensusRatio >= 0.92 ? "fair value" : r.consensusRatio > 1.08 ? "you pay a bit more" : "you get a bit more"}` : ""}
                   </div>
                 </div>
-                <div className="flex gap-2">
-                  <button className="btn btn-ghost" onClick={() => onLoad(i.partnerId, i.give, i.get)}>
+                <div className="grid grid-cols-2 gap-2 sm:flex">
+                  <button className="btn w-full sm:btn-ghost sm:w-auto" onClick={() => onLoad(i.partnerId, i.give, i.get)}>
                     Simulate
                   </button>
                   <button
-                    className="btn btn-ghost"
+                    className="btn w-full sm:btn-ghost sm:w-auto"
                     onClick={() =>
                       askAgent(
                         `Check this trade idea: I give ${i.give.map(name).join(" + ")} to ${partner?.teamName} for ${i.get

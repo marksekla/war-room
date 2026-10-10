@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { LeagueModel, PlayerView } from "@/lib/model";
 import { Delta, InjuryTag, Meter, Panel, PosTag, RankChip, Stat } from "./ui";
 import { PlayerName, usePlayerDrawer } from "./PlayerDrawer";
@@ -186,22 +186,7 @@ export default function Dashboard({
                   : t.playerId
                     ? () => open(t.playerId!)
                     : undefined;
-              return (
-                <li key={i}>
-                  <button
-                    type="button"
-                    disabled={!act}
-                    onClick={act}
-                    className="group flex w-full items-start gap-3 py-2.5 text-left text-sm text-ink"
-                  >
-                    <span className={`mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-md ${chip.cls}`}>
-                      <chip.Icon size={15} strokeWidth={2} />
-                    </span>
-                    <span className="min-w-0 flex-1 leading-snug group-enabled:group-hover:text-accentstrong">{t.text}</span>
-                    {act && <IconChevronRight size={16} className="mt-0.5 shrink-0 text-faint group-hover:text-accent" />}
-                  </button>
-                </li>
-              );
+              return <TodoRow key={i} text={t.text} chip={chip} act={act} />;
             })}
           </ul>
         </Panel>
@@ -554,6 +539,45 @@ export default function Dashboard({
         </p>
       </Panel>
     </div>
+  );
+}
+
+/**
+ * One to-do line. A one-line item centers its icon on the text; a wrapped item lines the icon's top
+ * up with the first line, so it reads right on both desktop and phones.
+ */
+function TodoRow({ text, chip, act }: { text: string; chip: { cls: string; Icon: (p: { size?: number; strokeWidth?: number }) => React.ReactNode }; act?: () => void }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [multi, setMulti] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const check = () => {
+      const lh = parseFloat(getComputedStyle(el).lineHeight) || 19;
+      setMulti(el.getBoundingClientRect().height > lh * 1.5);
+    };
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return (
+    <li>
+      <button
+        type="button"
+        disabled={!act}
+        onClick={act}
+        className={`group flex w-full gap-3 py-2.5 text-left text-sm text-ink ${multi ? "items-start" : "items-center"}`}
+      >
+        <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-md ${multi ? "mt-1" : ""} ${chip.cls}`}>
+          <chip.Icon size={15} strokeWidth={2} />
+        </span>
+        <span ref={ref} className="min-w-0 flex-1 leading-snug group-enabled:group-hover:text-accentstrong">
+          {text}
+        </span>
+        {act && <IconChevronRight size={16} className={`shrink-0 text-faint group-hover:text-accent ${multi ? "mt-0.5" : ""}`} />}
+      </button>
+    </li>
   );
 }
 
