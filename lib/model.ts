@@ -39,6 +39,54 @@ export interface GameLog {
   teamTargets: number;
 }
 
+export interface UsageRow {
+  id: string | null; // null for the grouped "Other" row
+  name: string;
+  short: string;
+  pos: string;
+  car: number;
+  tgt: number;
+  rz: number;
+  /** Share of the team's backfield opportunities (RB carries + targets) or of all team targets, 0-1. */
+  share: number;
+  /** Change vs his average share in earlier games this season (percentage points), null without history. */
+  delta: number | null;
+  /** Players folded into an "Other" row. */
+  others?: number;
+}
+
+export interface UsageTeam {
+  team: string;
+  score: number | null;
+  backfield: UsageRow[];
+  backfieldTotal: number;
+  targets: UsageRow[];
+  targetTotal: number;
+}
+
+export interface UsageGame {
+  week: number;
+  kickoff: string;
+  away: UsageTeam;
+  home: UsageTeam;
+}
+
+export interface InjuryRecapItem {
+  v: PlayerView;
+  team: string;
+  week: number;
+  /** What happened in the game: "Didn't return", "Q to return", "Returned", "Hurt in game" or "Left early". */
+  exit: string;
+  /** Current designation: OUT, IR, D, Q or Active. */
+  status: string;
+  injury: string | null;
+  note: string | null;
+  line: string; // his stats before he left
+  snapShare: number | null;
+  usualSnapShare: number | null;
+  nextUp: { v: PlayerView | null; name: string; line: string } | null;
+}
+
 export interface PlayerView {
   p: Player;
   ownerRosterId: number | null;
@@ -813,6 +861,220 @@ export class LeagueModel {
 
   private officialMap: Map<string, OfficialEntry> | null = null;
   /** This player's line on the official injury report, matched by name and team. */
+
+  // ---------- weekly usage splits and injury recap ----------
+
+  /** Weeks that have finished games to look back on: last week, plus this week once games have been played. */
+  reviewWeeks(): number[] {
+    const out: number[] = [];
+    for (const w of [this.week - 1, this.week]) {
+      if (w < 1) continue;
+      const wk = this.stats.find((x) => x.week === w);
+      if (wk && Object.keys(wk.lines).length > 0) out.push(w);
+    }
+    return out;
+  }
+
+  private shortName(name: string) {
+    const parts = name.replace(/\s+(Jr\.?|Sr\.?|II|III|IV)$/i, "").split(" ");
+    return parts.length > 1 ? `${parts[0][0]}. ${parts.slice(1).join(" ")}` : name;
+  }
+
+  /**
+   * Who got the work in each game of a week: each team's backfield (running backs' carries plus targets)
+   * and target share, with the change from each player's own average share in earlier games.
+   */
+  usageSplits(week: number): UsageGame[] {
+    const opp = (s: StatLine) => (s.rush_att ?? 0) + (s.rec_tgt ?? 0);
+    // Per team and week: backfield and target totals, and each player's shares.
+    const shares = new Map<string, { bf: number[]; tg: number[] }>(); // player id -> shares in earlier weeks
+    const weekTeams = new Map<number, Map<string, { bf: number; tg: number }>>();
+    for (const wk of this.stats) {
+      const t = new Map<string, { bf: number; tg: number }>();
+      for (const [id, line] of Object.entries(wk.lines)) {
+        const p = this.players[id];
+        if (!p || p.pos === "DEF" || p.pos === "K" || !line.team) continue;
+        const x = t.get(line.team) ?? { bf: 0, tg: 0 };
+        if (p.pos === "RB") x.bf += opp(line.s);
+        x.tg += line.s.rec_tgt ?? 0;
+        t.set(line.team, x);
+      }
+      weekTeams.set(wk.week, t);
+    }
+    for (const wk of this.stats) {
+      if (wk.week >= week) continue;
+      const t = weekTeams.get(wk.week)!;
+      for (const [id, line] of Object.entries(wk.lines)) {
+        const p = this.players[id];
+        if (!p || !line.team || !["RB", "WR", "TE"].includes(p.pos)) continue;
+        if (!((line.s.off_snp ?? 0) > 0 || (line.s.gp ?? 0) > 0)) continue;
+        const tot = t.get(line.team);
+        if (!tot) continue;
+        const h = shares.get(id) ?? { bf: [], tg: [] };
+        if (p.pos === "RB" && tot.bf > 0) h.bf.push(opp(line.s) / tot.bf);
+        if (tot.tg > 0) h.tg.push((line.s.rec_tgt ?? 0) / tot.tg);
+        shares.set(id, h);
+      }
+    }
+    const wk = this.stats.find((x) => x.week === week);
+    if (!wk) return [];
+    const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+    const totals = weekTeams.get(week)!;
+
+    const teamBlock = (team: string, oppTeam: string): UsageTeam | null => {
+      const tot = totals.get(team);
+      if (!tot) return null;
+      const players = Object.entries(wk.lines).filter(([id, l]) => l.team === team && this.players[id] && !["DEF", "K"].includes(this.players[id].pos));
+      const row = (id: string, s: StatLine, share: number, hist: number[] | undefined): UsageRow => {
+        const p = this.players[id];
+        const a = hist ? avg(hist) : null;
+        return {
+          id,
+          name: p.name,
+          short: this.shortName(p.name),
+          pos: p.pos,
+          car: s.rush_att ?? 0,
+          tgt: s.rec_tgt ?? 0,
+          rz: (s.rush_rz_att ?? 0) + (s.rec_rz_tgt ?? 0),
+          share,
+          delta: a == null ? null : Math.round((share - a) * 100),
+        };
+      };
+      const group = (rows: UsageRow[], keep: number, unit: "opp" | "tgt"): UsageRow[] => {
+        rows.sort((a, b) => b.share - a.share || b.car + b.tgt - (a.car + a.tgt));
+        if (rows.length <= keep + 1) return rows;
+        const rest = rows.slice(keep);
+        const share = rest.reduce((a, r) => a + r.share, 0);
+        const n = rest.reduce((a, r) => a + (unit === "tgt" ? r.tgt : r.car + r.tgt), 0);
+        return [
+          ...rows.slice(0, keep),
+          { id: null, name: `Other (${rest.length})`, short: `Other (${rest.length})`, pos: "", car: unit === "tgt" ? 0 : rest.reduce((a, r) => a + r.car, 0), tgt: rest.reduce((a, r) => a + r.tgt, 0), rz: rest.reduce((a, r) => a + r.rz, 0), share, delta: null, others: n },
+        ];
+      };
+      const backfield = group(
+        players
+          .filter(([id, l]) => this.players[id].pos === "RB" && opp(l.s) > 0 && tot.bf > 0)
+          .map(([id, l]) => row(id, l.s, opp(l.s) / tot.bf, shares.get(id)?.bf)),
+        3,
+        "opp"
+      );
+      const targets = group(
+        players
+          .filter(([, l]) => (l.s.rec_tgt ?? 0) > 0 && tot.tg > 0)
+          .map(([id, l]) => row(id, l.s, (l.s.rec_tgt ?? 0) / tot.tg, shares.get(id)?.tg)),
+        4,
+        "tgt"
+      );
+      const def = wk.lines[oppTeam]?.s;
+      return { team, score: def?.pts_allow ?? null, backfield, backfieldTotal: tot.bf, targets, targetTotal: tot.tg };
+    };
+
+    const out: UsageGame[] = [];
+    for (const g of this.schedule.games.filter((x) => x.week === week)) {
+      const away = teamBlock(g.away, g.home);
+      const home = teamBlock(g.home, g.away);
+      if (!away || !home) continue;
+      out.push({ week, kickoff: g.kickoff, away, home });
+    }
+    return out.sort((a, b) => a.kickoff.localeCompare(b.kickoff));
+  }
+
+  private statLineText(pos: string, s: StatLine) {
+    const bits: string[] = [];
+    if (pos === "QB") bits.push(`${s.pass_cmp ?? 0}/${s.pass_att ?? 0} pass`);
+    if ((s.rush_att ?? 0) > 0 || pos === "RB") bits.push(`${s.rush_att ?? 0} car`);
+    if (pos !== "QB") bits.push(`${s.rec_tgt ?? 0} tgt`);
+    const rz = (s.rush_rz_att ?? 0) + (s.rec_rz_tgt ?? 0);
+    if (rz > 0) bits.push(`${rz} RZ`);
+    return bits.join(" · ");
+  }
+
+  /**
+   * Fantasy-relevant players who got hurt in a week's games: news saying he left, didn't return or was
+   * questionable to return, a post-game update about an injury from that game, or a sharp drop in snaps
+   * with an injury designation since. Each comes with what he did before leaving and who stepped in.
+   */
+  injuryRecap(week: number): InjuryRecapItem[] {
+    const wk = this.stats.find((x) => x.week === week);
+    if (!wk) return [];
+    const out: InjuryRecapItem[] = [];
+    const DIDNT = /\b((did not|didn't|would not|wouldn't|could not|couldn't) return|ruled out for the (rest|remainder)|ruled out .{0,25}(rest|remainder) of|forced (him )?out|was carted|carted off|knocked out of)\b/;
+    const QRET = /\b(questionable|doubtful) to return\b/;
+    const BACK = /\b(returned to|was able to return|re-entered|came back into|later returned)\b/;
+    const HURT = /\b(exited|left (sunday's|monday's|thursday's|saturday's|the) (game|contest|loss|win)|injur(ed|y) (in|during) (sunday's|monday's|thursday's|saturday's|the)|(sustain(ed|ing)|suffer(ed|ing)|pick(ed|ing) up|tweak(ed|ing)|hurt (his|her)|injur(ed|ing) (his|her))\b.{0,60}\b(in|during) (sunday's|monday's|thursday's|saturday's|the|last)|walking boot|wearing a boot|in a boot|mri|x-rays?|concussion protocol|evaluated for a concussion|"tweak")/;
+    for (const [id, line] of Object.entries(wk.lines)) {
+      const v = this.views.get(id);
+      if (!v || !["QB", "RB", "WR", "TE"].includes(v.p.pos)) continue;
+      const snaps = line.s.off_snp ?? 0;
+      if (snaps <= 0) continue;
+      const g = this.gameFor(line.team || v.p.team, week);
+      if (!g) continue;
+      const kick = new Date(g.game.kickoff).getTime();
+      const earlier = v.log.filter((x) => x.week < week && x.teamSnaps > 0);
+      const usual = earlier.length ? earlier.reduce((a, x) => a + x.snaps / x.teamSnaps, 0) / earlier.length : null;
+      const share = line.s.tm_off_snp ? snaps / line.s.tm_off_snp : null;
+      const owned = v.ownerRosterId != null;
+      const relevant = (usual ?? share ?? 0) >= 0.35 || v.valuePg >= 6 || owned;
+      if (!relevant) continue;
+
+      // News from the game or right after it.
+      const e = v.espn;
+      const nDate = e?.date ? new Date(e.date).getTime() : 0;
+      const fresh = !!e?.short && nDate >= kick - 3_600_000 && nDate <= kick + 9 * 86_400_000;
+      let text = "";
+      if (fresh) {
+        text = e!.short!
+          .split(/(?<=[.!?])\s+/)
+          .map((sent) => aboutPlayer(sent, v.p.name))
+          .filter((x) => x.trim())
+          .join(" ");
+      }
+      const t = text.toLowerCase();
+      let exit: string | null = null;
+      if (t && DIDNT.test(t)) exit = "Didn't return";
+      else if (t && QRET.test(t)) exit = BACK.test(t) ? "Returned" : "Q to return";
+      else if (t && HURT.test(t)) {
+        // Words like "MRI" or "concussion protocol" alone could be about an older injury: tie it to this game,
+        // either in the wording or by him playing clearly fewer snaps than usual.
+        const tied = /\b(sun|mon|thurs?|satur|fri)day\b|\b(game|loss|win|contest|matchup)\b/.test(t);
+        const dropped = usual != null && share != null && share < usual * 0.85;
+        if (tied || dropped) exit = BACK.test(t) ? "Returned" : "Hurt in game";
+      }
+      // No news, but he played far fewer snaps than usual and carries an injury designation now.
+      const designation = v.p.injury ?? (e && e.status && e.status !== "Active" ? e.status : null);
+      if (!exit && usual != null && usual >= 0.45 && share != null && share < usual * 0.6 && designation) exit = "Left early";
+      if (!exit) continue;
+
+      const inj = v.p.injury;
+      const status = inj === "IR" || inj === "PUP" ? "IR" : inj === "Out" ? "OUT" : inj === "Doubtful" ? "D" : inj === "Questionable" ? "Q" : e?.status === "Out" ? "OUT" : e?.status === "Questionable" ? "Q" : "Active";
+
+      // Who took over: the teammate at his position with the most work that week.
+      const work = (s: StatLine, pos: string) => (pos === "QB" ? s.pass_att ?? 0 : pos === "RB" ? (s.rush_att ?? 0) + (s.rec_tgt ?? 0) : s.rec_tgt ?? 0);
+      let next: { id: string; s: StatLine } | null = null;
+      for (const [oid, ol] of Object.entries(wk.lines)) {
+        const op = this.players[oid];
+        if (oid === id || !op || op.pos !== v.p.pos || ol.team !== line.team) continue;
+        if (!next || work(ol.s, op.pos) > work(next.s, op.pos)) next = { id: oid, s: ol.s };
+      }
+      const nv = next ? this.views.get(next.id) ?? null : null;
+      out.push({
+        v,
+        team: line.team || v.p.team || "",
+        week,
+        exit,
+        status,
+        injury: v.p.injuryPart ?? e?.body ?? null,
+        note: text || null,
+        line: this.statLineText(v.p.pos, line.s),
+        snapShare: share,
+        usualSnapShare: usual,
+        nextUp: next && work(next.s, v.p.pos) > 0 ? { v: nv, name: this.players[next.id].name, line: this.statLineText(v.p.pos, next.s) } : null,
+      });
+    }
+    const rank = (x: InjuryRecapItem) => (x.status === "OUT" || x.status === "IR" ? 0 : x.status === "D" ? 1 : x.status === "Q" ? 2 : 3);
+    return out.sort((a, b) => rank(a) - rank(b) || b.v.valuePg - a.v.valuePg);
+  }
+
   officialFor(id: string): OfficialEntry | null {
     const rep = this.extras.official;
     if (!rep || rep.week !== this.week || !rep.rows?.length) return null;
@@ -2628,11 +2890,13 @@ function aboutPlayer(sentence: string, name?: string): string {
       const who = m[1].replace(/[^A-Za-z]/g, "").toLowerCase();
       if (who !== last && who !== first) return false;
     }
-    const lead = c.match(/^(?:as|so|while|but|and|since|because|with|after|meaning)?\s*([A-Z][a-z'.-]+)\s+([A-Z][A-Za-z'.-]+)\s/);
+    const lead = c.match(/^(?:as|so|while|but|and|since|because|with|after|meaning)?\s*([A-Z][A-Za-z'.-]+)\s+([A-Z][A-Za-z'.-]+)\s/);
     if (lead) {
       const a = lead[1].replace(/[^A-Za-z]/g, "").toLowerCase();
       const b = lead[2].replace(/[^A-Za-z]/g, "").toLowerCase();
-      if (b !== last && a !== first && a !== last) return false;
+      // "Jim Harbaugh said Harris..." is still about him: only drop it when his name isn't in the clause.
+      const mentions = last.length > 2 && new RegExp(`\\b${last}`, "i").test(c.replace(/[^A-Za-z\s]/g, ""));
+      if (b !== last && a !== first && a !== last && !mentions) return false;
     }
     return true;
   });

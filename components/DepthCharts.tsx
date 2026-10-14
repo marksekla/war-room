@@ -10,7 +10,7 @@ import { usePlayerDrawer } from "./PlayerDrawer";
 import { InjuryTag, Panel } from "./ui";
 import { IconCheck } from "./icons";
 
-const TEAM_NAMES: Record<string, string> = {
+export const TEAM_NAMES: Record<string, string> = {
   ARI: "Arizona Cardinals", ATL: "Atlanta Falcons", BAL: "Baltimore Ravens", BUF: "Buffalo Bills", CAR: "Carolina Panthers",
   CHI: "Chicago Bears", CIN: "Cincinnati Bengals", CLE: "Cleveland Browns", DAL: "Dallas Cowboys", DEN: "Denver Broncos",
   DET: "Detroit Lions", GB: "Green Bay Packers", HOU: "Houston Texans", IND: "Indianapolis Colts", JAX: "Jacksonville Jaguars",

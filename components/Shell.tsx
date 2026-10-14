@@ -8,8 +8,8 @@ import Dashboard from "./Dashboard";
 import Waivers from "./Waivers";
 import StartSit from "./StartSit";
 import Trades from "./Trades";
-import Availability from "./Availability";
-import DepthCharts from "./DepthCharts";
+import HealthTab from "./HealthTab";
+import DepthTab from "./DepthTab";
 import Chat from "./Chat";
 import { PlayerDrawerProvider } from "./PlayerDrawer";
 import PlayerSearch from "./PlayerSearch";
@@ -39,8 +39,8 @@ const NAV: NavItem[] = [
   { id: "trades", label: "Trades", short: "Trades", title: "Trades", sub: "Find, build and grade trades", Icon: IconTrade },
   { id: "waivers", label: "Waivers", short: "Waivers", title: "Waivers", sub: "The best pickups for your roster", Icon: IconUserPlus },
   { id: "lineup", label: "Start / Sit", short: "Start/Sit", title: "Start / Sit", sub: "Set your best lineup for the week", Icon: IconLineup },
-  { id: "health", label: "Are they playing", short: "Playing?", title: "Are they playing?", sub: "Practice reports and game status", Icon: IconPulse },
-  { id: "depth", label: "Depth charts", short: "Depth", title: "Depth charts", sub: "Every team's depth chart and who has them", Icon: IconLayers },
+  { id: "health", label: "Are they playing", short: "Playing?", title: "Are they playing?", sub: "Practice reports, game status and last week's injuries", Icon: IconPulse },
+  { id: "depth", label: "Depth charts", short: "Depth", title: "Depth charts", sub: "Depth charts and last week's usage for every team", Icon: IconLayers },
 ];
 
 const GROUPS: { label: string; ids: Tab[] }[] = [
@@ -230,8 +230,8 @@ export default function Shell() {
                 {tab === "dashboard" && <Dashboard model={model} myId={me.rosterId} go={go} />}
                 {tab === "waivers" && <Waivers model={model} myId={me.rosterId} />}
                 {tab === "lineup" && <StartSit model={model} myId={me.rosterId} />}
-                {tab === "health" && <Availability model={model} myId={me.rosterId} />}
-                {tab === "depth" && <DepthCharts model={model} myId={me.rosterId} />}
+                {tab === "health" && <HealthTab model={model} myId={me.rosterId} />}
+                {tab === "depth" && <DepthTab model={model} myId={me.rosterId} />}
                 {tab === "trades" && <Trades model={model} myId={me.rosterId} askAgent={askAgent} />}
                 {tab === "agent" && (
                   <Chat
