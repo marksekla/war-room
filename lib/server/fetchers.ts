@@ -196,7 +196,7 @@ interface EspnEvent {
   date: string;
   status?: { type?: { state?: string } };
   competitions?: {
-    competitors?: { homeAway: string; team: { abbreviation: string } }[];
+    competitors?: { homeAway: string; score?: string | number; team: { abbreviation: string } }[];
     odds?: { details?: string; overUnder?: number }[];
   }[];
 }
@@ -241,6 +241,9 @@ export function getSchedule(season: number): Promise<Schedule> {
           spread: parseSpread(odds?.details, h, a),
           total: typeof odds?.overUnder === "number" ? odds.overUnder : null,
           status: state === "post" ? "post" : state === "in" ? "in" : "pre",
+          // Final (or live) score, only once the game has started.
+          homeScore: state === "post" || state === "in" ? Number(home.score ?? NaN) : null,
+          awayScore: state === "post" || state === "in" ? Number(away.score ?? NaN) : null,
         });
       }
     });

@@ -968,8 +968,13 @@ export class LeagueModel {
         4,
         "tgt"
       );
-      const def = wk.lines[oppTeam]?.s;
-      return { team, score: def?.pts_allow ?? null, backfield, backfieldTotal: tot.bf, targets, targetTotal: tot.tg };
+      // Two players with the same initial and last name (Bijan and Brian Robinson) get full names.
+      for (const list of [backfield, targets]) {
+        const seen = new Map<string, number>();
+        for (const r of list) seen.set(r.short, (seen.get(r.short) ?? 0) + 1);
+        for (const r of list) if (r.id && (seen.get(r.short) ?? 0) > 1) r.short = r.name;
+      }
+      return { team, score: null, backfield, backfieldTotal: tot.bf, targets, targetTotal: tot.tg };
     };
 
     const out: UsageGame[] = [];
@@ -977,6 +982,10 @@ export class LeagueModel {
       const away = teamBlock(g.away, g.home);
       const home = teamBlock(g.home, g.away);
       if (!away || !home) continue;
+      // The real final score from the scoreboard (box-score "points allowed" leaves out defensive and return touchdowns).
+      const ok = (n: number | null | undefined) => (n != null && Number.isFinite(n) ? n : null);
+      away.score = ok(g.awayScore);
+      home.score = ok(g.homeScore);
       out.push({ week, kickoff: g.kickoff, away, home });
     }
     return out.sort((a, b) => a.kickoff.localeCompare(b.kickoff));
@@ -984,6 +993,8 @@ export class LeagueModel {
 
   private statLineText(pos: string, s: StatLine) {
     const bits: string[] = [];
+    if (pos === "K") return `${s.fgm ?? 0}/${s.fga ?? 0} FG · ${s.xpm ?? 0}/${s.xpa ?? 0} XP`;
+    if ((s.off_snp ?? 0) === 0 && !(s.rush_att || s.rec_tgt || s.pass_att)) return "Special teams only";
     if (pos === "QB") bits.push(`${s.pass_cmp ?? 0}/${s.pass_att ?? 0} pass`);
     if ((s.rush_att ?? 0) > 0 || pos === "RB") bits.push(`${s.rush_att ?? 0} car`);
     if (pos !== "QB") bits.push(`${s.rec_tgt ?? 0} tgt`);
@@ -1001,24 +1012,22 @@ export class LeagueModel {
     const wk = this.stats.find((x) => x.week === week);
     if (!wk) return [];
     const out: InjuryRecapItem[] = [];
-    const DIDNT = /\b((did not|didn't|would not|wouldn't|could not|couldn't) return|ruled out for the (rest|remainder)|ruled out .{0,25}(rest|remainder) of|forced (him )?out|was carted|carted off|knocked out of)\b/;
+    const DIDNT = /\b((did not|didn't|would not|wouldn't|could not|couldn't|won't|will not) return|ruled out for the (rest|remainder)|ruled out .{0,25}(rest|remainder) of|forced (him )?out|was carted|carted off|knocked out of)\b/;
     const QRET = /\b(questionable|doubtful) to return\b/;
     const BACK = /\b(returned to|was able to return|re-entered|came back into|later returned)\b/;
-    const HURT = /\b(exit(ed|ing)|left (sunday's|monday's|thursday's|saturday's|the) (game|contest|loss|win)|injur(ed|y) (in|during) (sunday's|monday's|thursday's|saturday's|the)|(sustain(ed|ing)|suffer(ed|ing)|pick(ed|ing) up|tweak(ed|ing)|strain(ed|ing)|sprain(ed|ing)|tore|tear(ing)?|aggravat(ed|ing)|hurt (his|her)|injur(ed|ing) (his|her))\b.{0,60}\b(in|during) (sunday's|monday's|thursday's|saturday's|the|last)|walking boot|wearing a boot|in a boot|mri|x-rays?|concussion protocol|evaluated for a concussion|"tweak")/;
+    const HURT = /\b(exit(ed|ing)|left (sunday's|monday's|thursday's|saturday's|the) (game|contest|loss|win)|injur(ed|y) (in|during) (sunday's|monday's|thursday's|saturday's|the)|(sustain(ed|ing)|suffer(ed|ing)|pick(ed|ing) up|tweak(ed|ing)|strain(ed|ing)|sprain(ed|ing)|tore|tear(ing)?|aggravat(ed|ing)|hurt (his|her)|injur(ed|ing) (his|her))\b.{0,60}\b(in|during) (sunday's|monday's|thursday's|saturday's|the|last)|walking boot|wearing a boot|in a boot|mri|x-rays?|concussion protocol|evaluated for a concussion|"tweak"|dealing with an? |bruise|contusion|banged up|limp(ed|ing)|hobbled|was shaken up)/;
     for (const [id, line] of Object.entries(wk.lines)) {
       const v = this.views.get(id);
-      if (!v || !["QB", "RB", "WR", "TE"].includes(v.p.pos)) continue;
+      if (!v || !["QB", "RB", "WR", "TE", "K"].includes(v.p.pos)) continue;
       const snaps = line.s.off_snp ?? 0;
-      if (snaps <= 0) continue;
+      // Played in the game: offensive snaps, or active and on the field (kickers and special-teamers show 0 offensive snaps).
+      if (snaps <= 0 && !((line.s.gp ?? 0) > 0)) continue;
       const g = this.gameFor(line.team || v.p.team, week);
       if (!g) continue;
       const kick = new Date(g.game.kickoff).getTime();
       const earlier = v.log.filter((x) => x.week < week && x.teamSnaps > 0);
       const usual = earlier.length ? earlier.reduce((a, x) => a + x.snaps / x.teamSnaps, 0) / earlier.length : null;
       const share = line.s.tm_off_snp ? snaps / line.s.tm_off_snp : null;
-      const owned = v.ownerRosterId != null;
-      const relevant = (usual ?? share ?? 0) >= 0.35 || v.valuePg >= 6 || owned;
-      if (!relevant) continue;
 
       // News from the game or right after it.
       const e = v.espn;
@@ -1045,8 +1054,13 @@ export class LeagueModel {
       }
       // No news, but he played far fewer snaps than usual and carries an injury designation now.
       const designation = v.p.injury ?? (e && e.status && e.status !== "Active" ? e.status : null);
-      const serious = designation === "Out" || designation === "IR" || designation === "Doubtful" || designation === "PUP";
+      const serious = designation === "Out" || designation === "IR" || designation === "Doubtful" || designation === "PUP" || designation === "Injured Reserve";
       if (!exit && usual != null && usual >= 0.45 && share != null && designation && (share < usual * 0.6 || (serious && share < usual * 0.75))) exit = "Left early";
+      // He played that week and is now out, doubtful or on IR for an injury: he got hurt in that game
+      // (or right after). Only for the week that just finished, since the status is today's.
+      const why = `${v.p.injuryPart ?? ""} ${e?.body ?? ""} ${e?.short ?? ""}`.toLowerCase();
+      const nonInjury = /coach'?s decision|not injury|personal|trade|suspen|illness|rest\b|deactivat/.test(why);
+      if (!exit && serious && !nonInjury && week === this.week - 1) exit = usual != null && usual >= 0.2 && share != null && share < usual * 0.85 ? "Left early" : "Injured";
       if (!exit) continue;
 
       const inj = v.p.injury;
@@ -1054,26 +1068,27 @@ export class LeagueModel {
 
       // Who took over: the teammate at his position with the most work that week.
       const work = (s: StatLine, pos: string) => (pos === "QB" ? s.pass_att ?? 0 : pos === "RB" ? (s.rush_att ?? 0) + (s.rec_tgt ?? 0) : s.rec_tgt ?? 0);
-      // Prefer the teammate whose snaps jumped the most over his own average (the one who actually filled in);
-      // otherwise the one with the most work.
+      // Next up: the teammate at his position whose work (carries + targets, or pass attempts) jumped the most
+      // over his own average in earlier games. Nobody with a real jump means nobody clearly took over.
       let next: { id: string; s: StatLine } | null = null;
-      let best = 0.1;
-      let busiest: { id: string; s: StatLine } | null = null;
+      let best = 1.5;
       for (const [oid, ol] of Object.entries(wk.lines)) {
         const op = this.players[oid];
         if (oid === id || !op || op.pos !== v.p.pos || ol.team !== line.team) continue;
-        if (work(ol.s, op.pos) <= 0) continue;
-        if (!busiest || work(ol.s, op.pos) > work(busiest.s, op.pos)) busiest = { id: oid, s: ol.s };
-        const ov = this.views.get(oid);
-        const prev = ov?.log.filter((x) => x.week < week && x.teamSnaps > 0) ?? [];
-        const theirUsual = prev.length ? prev.reduce((a2, x) => a2 + x.snaps / x.teamSnaps, 0) / prev.length : 0;
-        const theirShare = ol.s.tm_off_snp ? (ol.s.off_snp ?? 0) / ol.s.tm_off_snp : 0;
-        if (theirShare - theirUsual > best) {
-          best = theirShare - theirUsual;
+        const now = work(ol.s, op.pos);
+        if (now <= 0) continue;
+        const before = this.stats
+          .filter((w2) => w2.week < week)
+          .map((w2) => w2.lines[oid])
+          .filter((l2) => l2 && l2.team === line.team && ((l2.s.off_snp ?? 0) > 0 || (l2.s.gp ?? 0) > 0))
+          .map((l2) => work(l2!.s, op.pos));
+        const usualWork = before.length ? before.reduce((a2, x) => a2 + x, 0) / before.length : 0;
+        if (now - usualWork > best) {
+          best = now - usualWork;
           next = { id: oid, s: ol.s };
         }
       }
-      next = next ?? busiest;
+      if ((usual ?? share ?? 0) < 0.2) next = null; // special-teamers and deep backups: nobody "replaced" him
       const nv = next ? this.views.get(next.id) ?? null : null;
       out.push({
         v,
@@ -1090,7 +1105,8 @@ export class LeagueModel {
       });
     }
     const rank = (x: InjuryRecapItem) => (x.status === "OUT" || x.status === "IR" ? 0 : x.status === "D" ? 1 : x.status === "Q" ? 2 : 3);
-    return out.sort((a, b) => rank(a) - rank(b) || b.v.valuePg - a.v.valuePg);
+    const rostered = (x: InjuryRecapItem) => (x.v.ownerRosterId != null ? 0 : 1);
+    return out.sort((a, b) => rostered(a) - rostered(b) || rank(a) - rank(b) || b.v.valuePg - a.v.valuePg);
   }
 
   officialFor(id: string): OfficialEntry | null {

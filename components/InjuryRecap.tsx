@@ -21,6 +21,7 @@ const EXIT_STYLE: Record<string, string> = {
   "Q to return": "text-warn",
   "Hurt in game": "text-warn",
   "Left early": "text-warn",
+  Injured: "text-warn",
   Returned: "text-good",
 };
 
@@ -128,10 +129,10 @@ function RecapCard({ x, model, myId }: { x: InjuryRecapItem; model: LeagueModel;
         <dt className="text-muted">Before exit</dt>
         <dd className="text-ink">
           {x.line}
-          {x.snapShare != null && (
+          {x.snapShare != null && x.snapShare > 0 && (
             <span className="text-muted">
               {" "}
-              · {pct(x.snapShare)} snaps{x.usualSnapShare != null ? ` (usually ${pct(x.usualSnapShare)})` : ""}
+              · {pct(x.snapShare)} snaps{x.usualSnapShare != null && x.usualSnapShare >= 0.05 ? ` (usually ${pct(x.usualSnapShare)})` : ""}
             </span>
           )}
         </dd>

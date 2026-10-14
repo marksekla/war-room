@@ -42,6 +42,8 @@ export interface Game {
   spread: number | null; // home spread, negative = home favored
   total: number | null;
   status: "pre" | "in" | "post";
+  homeScore?: number | null;
+  awayScore?: number | null;
 }
 
 export interface Schedule {
