@@ -47,6 +47,8 @@ export interface UsageRow {
   car: number;
   tgt: number;
   rz: number;
+  /** Red-zone targets only (for the targets chart). */
+  rzTgt: number;
   /** Share of the team's backfield opportunities (RB carries + targets) or of all team targets, 0-1. */
   share: number;
   /** Change vs his average share in earlier games this season (percentage points), null without history. */
@@ -936,6 +938,7 @@ export class LeagueModel {
           car: s.rush_att ?? 0,
           tgt: s.rec_tgt ?? 0,
           rz: (s.rush_rz_att ?? 0) + (s.rec_rz_tgt ?? 0),
+          rzTgt: s.rec_rz_tgt ?? 0,
           share,
           delta: a == null ? null : Math.round((share - a) * 100),
         };
@@ -948,7 +951,7 @@ export class LeagueModel {
         const n = rest.reduce((a, r) => a + (unit === "tgt" ? r.tgt : r.car + r.tgt), 0);
         return [
           ...rows.slice(0, keep),
-          { id: null, name: `Other (${rest.length})`, short: `Other (${rest.length})`, pos: "", car: unit === "tgt" ? 0 : rest.reduce((a, r) => a + r.car, 0), tgt: rest.reduce((a, r) => a + r.tgt, 0), rz: rest.reduce((a, r) => a + r.rz, 0), share, delta: null, others: n },
+          { id: null, name: `Other (${rest.length})`, short: `Other (${rest.length})`, pos: "", car: unit === "tgt" ? 0 : rest.reduce((a, r) => a + r.car, 0), tgt: rest.reduce((a, r) => a + r.tgt, 0), rz: rest.reduce((a, r) => a + r.rz, 0), rzTgt: rest.reduce((a, r) => a + r.rzTgt, 0), share, delta: null, others: n },
         ];
       };
       const backfield = group(
@@ -1001,7 +1004,7 @@ export class LeagueModel {
     const DIDNT = /\b((did not|didn't|would not|wouldn't|could not|couldn't) return|ruled out for the (rest|remainder)|ruled out .{0,25}(rest|remainder) of|forced (him )?out|was carted|carted off|knocked out of)\b/;
     const QRET = /\b(questionable|doubtful) to return\b/;
     const BACK = /\b(returned to|was able to return|re-entered|came back into|later returned)\b/;
-    const HURT = /\b(exited|left (sunday's|monday's|thursday's|saturday's|the) (game|contest|loss|win)|injur(ed|y) (in|during) (sunday's|monday's|thursday's|saturday's|the)|(sustain(ed|ing)|suffer(ed|ing)|pick(ed|ing) up|tweak(ed|ing)|hurt (his|her)|injur(ed|ing) (his|her))\b.{0,60}\b(in|during) (sunday's|monday's|thursday's|saturday's|the|last)|walking boot|wearing a boot|in a boot|mri|x-rays?|concussion protocol|evaluated for a concussion|"tweak")/;
+    const HURT = /\b(exit(ed|ing)|left (sunday's|monday's|thursday's|saturday's|the) (game|contest|loss|win)|injur(ed|y) (in|during) (sunday's|monday's|thursday's|saturday's|the)|(sustain(ed|ing)|suffer(ed|ing)|pick(ed|ing) up|tweak(ed|ing)|strain(ed|ing)|sprain(ed|ing)|tore|tear(ing)?|aggravat(ed|ing)|hurt (his|her)|injur(ed|ing) (his|her))\b.{0,60}\b(in|during) (sunday's|monday's|thursday's|saturday's|the|last)|walking boot|wearing a boot|in a boot|mri|x-rays?|concussion protocol|evaluated for a concussion|"tweak")/;
     for (const [id, line] of Object.entries(wk.lines)) {
       const v = this.views.get(id);
       if (!v || !["QB", "RB", "WR", "TE"].includes(v.p.pos)) continue;
@@ -1042,7 +1045,8 @@ export class LeagueModel {
       }
       // No news, but he played far fewer snaps than usual and carries an injury designation now.
       const designation = v.p.injury ?? (e && e.status && e.status !== "Active" ? e.status : null);
-      if (!exit && usual != null && usual >= 0.45 && share != null && share < usual * 0.6 && designation) exit = "Left early";
+      const serious = designation === "Out" || designation === "IR" || designation === "Doubtful" || designation === "PUP";
+      if (!exit && usual != null && usual >= 0.45 && share != null && designation && (share < usual * 0.6 || (serious && share < usual * 0.75))) exit = "Left early";
       if (!exit) continue;
 
       const inj = v.p.injury;
@@ -1050,12 +1054,26 @@ export class LeagueModel {
 
       // Who took over: the teammate at his position with the most work that week.
       const work = (s: StatLine, pos: string) => (pos === "QB" ? s.pass_att ?? 0 : pos === "RB" ? (s.rush_att ?? 0) + (s.rec_tgt ?? 0) : s.rec_tgt ?? 0);
+      // Prefer the teammate whose snaps jumped the most over his own average (the one who actually filled in);
+      // otherwise the one with the most work.
       let next: { id: string; s: StatLine } | null = null;
+      let best = 0.1;
+      let busiest: { id: string; s: StatLine } | null = null;
       for (const [oid, ol] of Object.entries(wk.lines)) {
         const op = this.players[oid];
         if (oid === id || !op || op.pos !== v.p.pos || ol.team !== line.team) continue;
-        if (!next || work(ol.s, op.pos) > work(next.s, op.pos)) next = { id: oid, s: ol.s };
+        if (work(ol.s, op.pos) <= 0) continue;
+        if (!busiest || work(ol.s, op.pos) > work(busiest.s, op.pos)) busiest = { id: oid, s: ol.s };
+        const ov = this.views.get(oid);
+        const prev = ov?.log.filter((x) => x.week < week && x.teamSnaps > 0) ?? [];
+        const theirUsual = prev.length ? prev.reduce((a2, x) => a2 + x.snaps / x.teamSnaps, 0) / prev.length : 0;
+        const theirShare = ol.s.tm_off_snp ? (ol.s.off_snp ?? 0) / ol.s.tm_off_snp : 0;
+        if (theirShare - theirUsual > best) {
+          best = theirShare - theirUsual;
+          next = { id: oid, s: ol.s };
+        }
       }
+      next = next ?? busiest;
       const nv = next ? this.views.get(next.id) ?? null : null;
       out.push({
         v,

@@ -161,15 +161,15 @@ function Split({ title, unit, total, rows, mine, kind }: { title: string; unit: 
                     )}
                     <span className="block truncate text-[11px] text-muted">
                       {kind === "bf" ? `${r.car} car · ${r.tgt} tgt` : `${r.tgt} tgt`}
-                      {r.rz > 0 && r.id ? ` · ${r.rz} RZ` : ""}
+                      {r.id && (kind === "bf" ? r.rz : r.rzTgt) > 0 ? ` · ${kind === "bf" ? r.rz : r.rzTgt} RZ` : ""}
                     </span>
                   </div>
                   <span className="w-10 shrink-0 text-right font-mono text-[13px] font-semibold text-ink">{Math.round(r.share * 100)}%</span>
                   <span
-                    className={`w-9 shrink-0 text-right font-mono text-[11px] ${r.delta == null || r.delta === 0 ? "text-faint" : r.delta > 0 ? "text-good" : "text-bad"}`}
+                    className={`w-11 shrink-0 text-right font-mono text-[11px] ${r.delta == null || r.delta === 0 ? "text-faint" : r.delta > 0 ? "text-good" : "text-bad"}`}
                     title={r.delta == null ? "No earlier games to compare" : "Change from his average share in earlier games"}
                   >
-                    {r.delta == null ? "" : r.delta === 0 ? "0" : `${r.delta > 0 ? "▲" : "▼"}${Math.abs(r.delta)}`}
+                    {r.delta == null ? "" : r.delta === 0 ? "0%" : `${r.delta > 0 ? "▲" : "▼"}${Math.abs(r.delta)}%`}
                   </span>
                 </li>
               );
