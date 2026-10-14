@@ -737,6 +737,8 @@ export class LeagueModel {
       if (v.espn?.returnDate) back = firstWeekOnOrAfter(v.p.team, v.espn.returnDate);
       // ESPN updates faster than Sleeper: an "Out" player ESPN expects back for this week's game isn't out.
       if (!long && back != null && back <= this.week) continue;
+      // No ESPN date: a torn ACL or Achilles on IR ends the season; otherwise assume the 4-game minimum.
+      if (back == null && inj === "IR" && /\bACL\b|achilles/i.test(v.p.injuryPart ?? "")) back = 19;
       if (back == null) back = this.week + (long ? 4 : 1);
       back = Math.max(back, this.week + 1);
       this.returnWeek.set(v.p.id, back);

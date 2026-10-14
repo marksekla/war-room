@@ -367,7 +367,9 @@ interface EspnInjuryRaw {
 
 export function getInjuries(): Promise<EspnInjury[]> {
   return cached("espn-injuries", 15 * MIN, async () => {
-    const j = await getJson<{ injuries?: { displayName?: string; injuries?: EspnInjuryRaw[] }[] }>(`${ESPN}/injuries`);
+    const j = await getJson<{ season?: { year?: number }; injuries?: { id?: string; displayName?: string; injuries?: EspnInjuryRaw[] }[] }>(
+      `${ESPN}/injuries`
+    );
     const out: EspnInjury[] = [];
     for (const team of j.injuries ?? []) {
       for (const i of team.injuries ?? []) {
@@ -395,7 +397,107 @@ export function getInjuries(): Promise<EspnInjury[]> {
         });
       }
     }
+    // ESPN's league feed stops at 25 players per team, newest first, so players hurt weeks ago
+    // (season-ending IR cases like a torn ACL) drop off it. Fill them in from team rosters.
+    const teamIds = (j.injuries ?? []).map((t) => t.id).filter((x): x is string => !!x);
+    const season = j.season?.year ?? new Date().getFullYear();
+    if (teamIds.length) {
+      const seen = new Set(out.map((x) => x.espnId).filter(Boolean) as string[]);
+      try {
+        const extra = await withTimeout(getLongTermInjuries(teamIds, season), 20_000);
+        for (const x of extra) if (x.espnId && !seen.has(x.espnId)) out.push(x);
+      } catch {
+        // The base feed is still useful on its own.
+      }
+    }
     return out;
+  });
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
+}
+
+async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let i = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (i < items.length) {
+        const k = i++;
+        out[k] = await fn(items[k]);
+      }
+    })
+  );
+  return out;
+}
+
+const SKILL_ESPN = new Set(["QB", "RB", "FB", "WR", "TE", "PK", "K"]);
+
+interface EspnRosterAthlete {
+  id?: string;
+  displayName?: string;
+  position?: { abbreviation?: string };
+  injuries?: { status?: string; date?: string }[];
+}
+
+/**
+ * Injured reserve, PUP and other long-term cases from every team's roster, with ESPN's own
+ * estimated return date and note. Cached for hours: these timelines move slowly.
+ */
+function getLongTermInjuries(teamIds: string[], season: number): Promise<EspnInjury[]> {
+  return cached(`espn-longterm:${season}`, 3 * HOUR, async () => {
+    let failed = 0;
+    const rosters = await mapLimit(teamIds, 8, async (tid) => {
+      try {
+        const r = await getJson<{ team?: { abbreviation?: string }; athletes?: { position?: string; items?: EspnRosterAthlete[] }[] }>(
+          `${ESPN}/teams/${tid}/roster`
+        );
+        const team = r.team?.abbreviation ? fixAbbr(r.team.abbreviation) : null;
+        const hurt = (r.athletes ?? [])
+          .filter((g) => g.position === "injuredReserveOrOut" || g.position === "suspended")
+          .flatMap((g) => g.items ?? [])
+          .filter((a) => a.id && SKILL_ESPN.has(a.position?.abbreviation ?? ""));
+        return hurt.map((a) => ({ a, team }));
+      } catch {
+        failed++;
+        return [];
+      }
+    });
+    // Don't cache a mostly failed pull for hours; the next request tries again.
+    if (failed > teamIds.length / 2) throw new Error("ESPN rosters unavailable");
+    const list = rosters.flat();
+    const rows = await mapLimit(list, 10, async ({ a, team }) => {
+      const base: EspnInjury = {
+        espnId: a.id!,
+        name: a.displayName ?? "",
+        pos: a.position?.abbreviation ?? null,
+        team,
+        status: a.injuries?.[0]?.status ?? "Injured Reserve",
+        date: a.injuries?.[0]?.date ?? null,
+        short: null,
+        body: null,
+        returnDate: null,
+      };
+      try {
+        const r = await getJson<{ items?: (EspnInjuryRaw & { date?: string })[] }>(
+          `https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/seasons/${season}/athletes/${a.id}/injuries`
+        );
+        const latest = [...(r.items ?? [])].sort((x, y) => ((y.date ?? "") > (x.date ?? "") ? 1 : -1))[0];
+        if (!latest) return base;
+        return {
+          ...base,
+          status: latest.status ?? base.status,
+          date: latest.date ?? base.date,
+          short: latest.shortComment ? latest.shortComment.slice(0, 400) : null,
+          body: latest.details?.type ?? latest.details?.location ?? null,
+          returnDate: latest.details?.returnDate ?? null,
+        };
+      } catch {
+        return base;
+      }
+    });
+    return rows;
   });
 }
 
